@@ -780,6 +780,7 @@ apiRouter.post("/pairing/confirm-code", async (c) => {
         name: "Dispositivo vinculado",
         age_mode: "teen",
         shared_alert_levels: [1, 2, 3],
+        device_token: (session as any).fcm_push_token ?? null,
       })
       .select("id")
       .single();
@@ -788,6 +789,14 @@ apiRouter.post("/pairing/confirm-code", async (c) => {
       return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, minorError?.message || "Error al crear menor.");
     }
     minorId = String(minor.id);
+  }
+
+  // Si el dispositivo ya había generado un FCM token, persístelo en el menor.
+  // (En el esquema actual, `minors.device_token` es el destino final; `pairing_sessions.fcm_push_token` es temporal.)
+  const fcmToken = typeof (session as any).fcm_push_token === "string" ? String((session as any).fcm_push_token) : null;
+  if (fcmToken) {
+    // No sobrescribimos si ya existe uno; esto permite renovar el token con un endpoint dedicado más adelante.
+    await supabase.from("minors").update({ device_token: fcmToken }).eq("id", minorId).is("device_token", null);
   }
 
   // Crea el Device si aún no existe para esta sesión.
