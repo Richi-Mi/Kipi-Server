@@ -5,6 +5,8 @@ import { isUuid } from "../validation/uuid.js";
 import { requireSupabaseUser } from "../auth/requireSupabaseUser.js";
 import { getSupabaseAdmin } from "../supabase/client.js";
 import { generatePairingOtp, normalizePairingOtp, isValidPairingOtpFormat } from "../pairing/otp.js";
+import { PARENT_DASHBOARD_ASSISTANT_SYSTEM_PROMPT } from "../assistant/masterPrompt.js";
+import { geminiGenerateText } from "../model-providers/gemini.js";
 
 type OwnedMinorAuth = { parentId: string; minorId: string };
 
@@ -1003,13 +1005,153 @@ apiRouter.post("/assistant/chat", async (c) => {
     body = {};
   }
   const record = body as Record<string, unknown>;
-  const prompt = typeof record["message"] === "string" ? record["message"] : "";
 
-  return c.json({
-    ok: true as const,
-    reply:
-      prompt.trim().length > 0
-        ? `Te leo. Sobre: "${prompt.trim().slice(0, 180)}". (Demo: asistente real pendiente de integración)`
-        : "Hola. (Demo) ¿En qué te puedo ayudar?",
+  const parentId = typeof record["parent_id"] === "string" ? record["parent_id"] : "";
+  if (!parentId || !isUuid(parentId)) {
+    return writeProblem(c, ApiErrorCode.INVALID_UUID, "parent_id es obligatorio y debe ser un UUID válido.");
+  }
+  if (auth.user.id !== parentId) {
+    return writeProblem(c, ApiErrorCode.FORBIDDEN, "No tienes permisos para usar el asistente con ese parent_id.");
+  }
+
+  const message = typeof record["message"] === "string" ? record["message"] : "";
+  const trimmed = message.trim();
+  if (trimmed.length < 3) {
+    return writeProblem(c, ApiErrorCode.TEXT_TOO_SHORT, "message es obligatorio y debe tener al menos 3 caracteres.");
+  }
+
+  const uiContext = typeof record["ui_context"] === "object" && record["ui_context"] ? record["ui_context"] : null;
+
+  const started = Date.now();
+  const supabase = getSupabaseAdmin();
+
+  const [{ data: minors, error: minorsError }, { data: parentRow, error: parentError }] = await Promise.all([
+    supabase
+      .from("minors")
+      .select("id,name,age_mode,shared_alert_levels,created_at")
+      .eq("parent_id", parentId)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("parents")
+      .select("safe_days_streak,completed_missions,created_at")
+      .eq("id", parentId)
+      .maybeSingle(),
+  ]);
+
+  if (minorsError) {
+    return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, minorsError.message || "Error al cargar menores.");
+  }
+  if (parentError) {
+    return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, parentError.message || "Error al cargar perfil del padre.");
+  }
+
+  const minorIds = (minors ?? []).map((m: any) => m.id).filter((id: any) => typeof id === "string");
+  const { data: recentAlerts } = minorIds.length
+    ? await supabase
+        .from("alerts")
+        .select("id,minor_id,app_source,risk_level,sensitive_data_flag,escalated_to_parent,created_at")
+        .in("minor_id", minorIds)
+        .order("created_at", { ascending: false })
+        .limit(25)
+    : { data: [] as any[] };
+
+  const dashboardContext = {
+    parent_id: parentId,
+    parent: {
+      safe_days_streak: (parentRow as any)?.safe_days_streak ?? null,
+      completed_missions: (parentRow as any)?.completed_missions ?? null,
+      created_at: (parentRow as any)?.created_at ?? null,
+    },
+    minors: (minors ?? []).map((m: any) => ({
+      id: m.id,
+      name: m.name,
+      age_mode: m.age_mode,
+      shared_alert_levels: m.shared_alert_levels ?? [1, 2, 3],
+      created_at: m.created_at ?? null,
+    })),
+    recent_alerts: (recentAlerts ?? []).map((a: any) => ({
+      id: a.id,
+      minor_id: a.minor_id,
+      app_source: a.app_source,
+      risk_level: a.risk_level,
+      sensitive_data_flag: a.sensitive_data_flag,
+      escalated_to_parent: a.escalated_to_parent,
+      created_at: a.created_at,
+    })),
+    ui_context: uiContext,
+    constraints: {
+      firewall_ciego: "Kipi Safe no lee chats; trabaja con alertas, acuerdos y recomendaciones educativas.",
+    },
+  };
+
+  const geminiMock =
+    String(process.env["GEMINI_MOCK"] ?? "")
+      .trim()
+      .toLowerCase() in { "1": true, true: true, yes: true, on: true };
+
+  const apiKey = String(process.env["GEMINI_API_KEY"] ?? "").trim();
+  const model = String(process.env["GEMINI_MODEL"] ?? "gemini-2.5-flash-lite").trim() || "gemini-2.5-flash-lite";
+
+  function mockAssistantResponse(m: string): string {
+    const lower = m.toLowerCase();
+    if (lower.includes("racha") || lower.includes("streak")) {
+      return (
+        "La Racha de Paz Mental cuenta días consecutivos (UTC) sin alertas de nivel 2 o 3 en tus menores.\n" +
+        "- Si hoy hubo una alerta nivel 2/3, la racha puede bajar.\n" +
+        "- Para subirla, revisa alertas recientes y refuerza acuerdos + misiones educativas.\n"
+      );
+    }
+    if (lower.includes("misión") || lower.includes("mision")) {
+      return (
+        "Las Misiones son lecturas cortas para fortalecer crianza digital.\n" +
+        "- Abre una misión y márcala como completada.\n" +
+        "- Se guarda en tu perfil y ayuda a mantener hábitos.\n"
+      );
+    }
+    if (lower.includes("alerta") || lower.includes("nivel")) {
+      return (
+        "Puedo ayudarte a interpretar alertas.\n" +
+        "- Nivel 1: informativa.\n" +
+        "- Nivel 2: requiere atención y conversación.\n" +
+        "- Nivel 3: prioridad alta; considera apoyo profesional si hay riesgo.\n" +
+        "Dime qué alerta te preocupa (app y nivel) y qué objetivo tienes (prevención, conversación, seguimiento)."
+      );
+    }
+    return (
+      "Puedo ayudarte a usar el dashboard y entender alertas, acuerdos de privacidad y misiones.\n" +
+      "Dime qué parte te interesa (alertas, acuerdos por edad, racha, misiones) y qué objetivo tienes hoy."
+    );
+  }
+
+  if (geminiMock || !apiKey) {
+    const reply = mockAssistantResponse(trimmed);
+    return c.json({ ok: true as const, reply, procesado_en_ms: Date.now() - started, mock: true });
+  }
+
+  const userMessage =
+    "Contexto del dashboard (JSON; puede ser null en campos):\n" +
+    `${JSON.stringify(dashboardContext)}\n\n` +
+    "Pregunta del padre:\n" +
+    trimmed;
+
+  const result = await geminiGenerateText({
+    apiKey,
+    model,
+    systemInstruction: PARENT_DASHBOARD_ASSISTANT_SYSTEM_PROMPT,
+    userMessage,
+    temperature: 0.45,
+    timeoutMs: 12_000,
   });
+
+  if (!result.ok) {
+    const raw = String(result.error || "").toLowerCase();
+    const is429 = raw.includes("429") || raw.includes("too many requests") || raw.includes("spending cap");
+    if (process.env["NODE_ENV"] !== "production" && is429) {
+      const reply = mockAssistantResponse(trimmed);
+      return c.json({ ok: true as const, reply, procesado_en_ms: Date.now() - started, mock: true });
+    }
+    return writeProblem(c, ApiErrorCode.MODEL_PROVIDER_ERROR, result.error || "Error al llamar al modelo.");
+  }
+
+  return c.json({ ok: true as const, reply: result.text, procesado_en_ms: Date.now() - started });
 });

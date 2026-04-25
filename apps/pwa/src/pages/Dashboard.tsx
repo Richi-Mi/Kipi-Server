@@ -13,6 +13,7 @@ import { ParentalAgreements } from "@/components/dashboard/ParentalAgreements";
 import { StreakCounter } from "@/components/dashboard/StreakCounter";
 import { EducationalMissions } from "@/components/dashboard/EducationalMissions";
 import { ParentalChat } from "@/components/dashboard/ParentalChat";
+import { InstallPwaButton } from "@/components/pwa/InstallPwaButton";
 import { useAuth } from "@/context/AuthContext";
 import { apiUrl } from "@/lib/api";
 import type { AlertItem, ChildProfile } from "@/components/dashboard/types";
@@ -124,7 +125,6 @@ export default function Dashboard() {
     <div className="flex flex-col h-screen bg-background">
       <Header
         onMenuClick={() => setMobileSidebarOpen(true)}
-        unreadAlerts={unreadAlerts}
         activeChildIndex={activeChildIndex}
         onChildChange={setActiveChildIndex}
         profiles={profiles}
@@ -198,6 +198,9 @@ export default function Dashboard() {
                 enabled={!!useLiveApi}
                 childName={activeChild?.name || "tu hijo"}
               />
+              <div className="mt-3 flex items-center justify-start">
+                <InstallPwaButton />
+              </div>
             </div>
             <div id="section-chat">
               <ParentalChat

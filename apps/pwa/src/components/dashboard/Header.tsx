@@ -1,19 +1,16 @@
-import { Bell, Menu, ShieldCheck } from "lucide-react";
+import { Menu, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { ChildProfile } from "./types";
 
 export function Header({
   onMenuClick,
-  unreadAlerts,
   activeChildIndex,
   onChildChange,
   profiles,
 }: {
   onMenuClick: () => void;
-  unreadAlerts: number;
   activeChildIndex: number;
   onChildChange: (index: number) => void;
   profiles: ChildProfile[];
@@ -36,7 +33,7 @@ export function Header({
           <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center shadow-primary">
             {!logoFailed ? (
               <img
-                src="/brand/logo.png"
+                src="/kipisafe/logo.svg"
                 alt="Kipi Safe"
                 className="w-5 h-5 object-contain"
                 onError={() => setLogoFailed(true)}
@@ -81,27 +78,6 @@ export function Header({
             </button>
           ))}
         </div>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="relative h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted"
-        >
-          <Bell className="w-5 h-5" />
-          {unreadAlerts > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-warn text-warn-foreground rounded-full text-[10px] flex items-center justify-center font-bold">
-              {unreadAlerts}
-            </span>
-          )}
-        </Button>
-
-        <Avatar className="w-8 h-8">
-          <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold font-display">
-            AN
-          </AvatarFallback>
-        </Avatar>
       </div>
     </header>
   );

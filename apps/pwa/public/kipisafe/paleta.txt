@@ -1,0 +1,11 @@
+HEX:
+
+Azul		-	#32B4D1
+Verdeagua	-	#32D2BA
+Verde		-	#32D285
+
+Tipografia:
+
+Bahuas 93
+
+Recomiendo Arial para textos, a veces mas simple es mejor

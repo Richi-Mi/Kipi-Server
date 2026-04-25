@@ -15,14 +15,14 @@
   "categories": ["health", "lifestyle", "security"],
   "icons": [
     {
-      "src": "/icons/app.svg",
+      "src": "/kipisafe/logo.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/icons/maskable.svg",
-      "sizes": "512x512",
+      "src": "/kipisafe/logo.svg",
+      "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "maskable"
     }

@@ -58,7 +58,7 @@ export function Sidebar({
             <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center">
               {!logoFailed ? (
                 <img
-                  src="/brand/logo.png"
+                  src="/kipisafe/logo.svg"
                   alt="Kipi Safe"
                   className="w-5 h-5 object-contain"
                   onError={() => setLogoFailed(true)}
@@ -158,9 +158,15 @@ export function Sidebar({
         })}
 
         <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted transition-colors duration-150 group mt-1">
-          <div className="w-8 h-8 rounded-full gradient-primary flex items-center justify-center shrink-0">
-            <span className="text-xs font-bold text-primary-foreground">
-              {user?.name?.slice?.(0, 2)?.toUpperCase?.() || "AN"}
+          <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground ring-1 ring-primary/20 flex items-center justify-center shrink-0">
+            <span className="text-xs font-extrabold tracking-wide">
+              {(user?.name || "")
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((p: string) => p[0]?.toUpperCase?.() || "")
+                .join("") || "TU"}
             </span>
           </div>
           <div className="flex-1 min-w-0">
