@@ -13,8 +13,17 @@ export async function requireSupabaseUser(c: Context): Promise<
   | { ok: true; user: { id: string; email?: string | null }; token: string }
   | { ok: false; response: Response }
 > {
-  const token = parseBearerToken(c.req.header("Authorization"));
+  const authHeader = c.req.header("Authorization");
+  const token = parseBearerToken(authHeader);
   if (!token) {
+    // Safe log: never include token contents.
+    const scheme = typeof authHeader === "string" ? authHeader.trim().split(/\s+/)[0] : "missing";
+    console.warn("[kipi/api][auth] Missing/invalid Authorization header", {
+      path: new URL(c.req.url).pathname,
+      scheme,
+      origin: c.req.header("Origin") ?? null,
+      user_agent: c.req.header("User-Agent") ?? null,
+    });
     return {
       ok: false,
       response: writeProblem(c, ApiErrorCode.AUTH_REQUIRED, "Falta Authorization: Bearer <token>."),
@@ -24,9 +33,19 @@ export async function requireSupabaseUser(c: Context): Promise<
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data?.user) {
+    console.warn("[kipi/api][auth] Supabase token rejected", {
+      path: new URL(c.req.url).pathname,
+      origin: c.req.header("Origin") ?? null,
+      user_agent: c.req.header("User-Agent") ?? null,
+      supabase_error: error?.message ?? null,
+    });
     return {
       ok: false,
-      response: writeProblem(c, ApiErrorCode.AUTH_REQUIRED, "Token inválido o expirado."),
+      response: writeProblem(
+        c,
+        ApiErrorCode.AUTH_REQUIRED,
+        error?.message ? `Token inválido o expirado. (${error.message})` : "Token inválido o expirado.",
+      ),
     };
   }
 
