@@ -8,6 +8,7 @@
     "dev": "vite",
     "prebuild": "pnpm --filter @kipi/domain run build",
     "build": "tsc -p tsconfig.app.json && vite build",
+    "start": "vite preview",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
     "lint": "echo \"(add eslint when ready)\""

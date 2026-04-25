@@ -5,6 +5,7 @@ import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
+const previewPort = Number(process.env["PORT"]) || 4173;
 
 export default defineConfig({
   plugins: [
@@ -51,6 +52,10 @@ export default defineConfig({
     alias: {
       "@": path.resolve(dirname, "src"),
     },
+  },
+  preview: {
+    host: true,
+    port: previewPort,
   },
   server: {
     proxy: {

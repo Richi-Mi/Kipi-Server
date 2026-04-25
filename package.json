@@ -7,9 +7,14 @@
   },
   "scripts": {
     "build:domain": "pnpm --filter @kipi/domain run build",
+    "build:api": "pnpm run build:domain && pnpm --filter @kipi/api run build",
+    "build:pwa": "pnpm run build:domain && pnpm --filter @kipi/pwa run build",
     "dev": "pnpm run build:domain && pnpm -r --parallel --filter ./apps/* dev",
     "build": "pnpm run build:domain && pnpm -r --filter ./apps/* build",
     "typecheck": "pnpm run build:domain && pnpm -r typecheck",
-    "lint": "pnpm -r lint"
+    "lint": "pnpm -r lint",
+    "start": "pnpm --filter @kipi/api start",
+    "start:api": "pnpm --filter @kipi/api start",
+    "start:pwa": "pnpm --filter @kipi/pwa start"
   }
 }

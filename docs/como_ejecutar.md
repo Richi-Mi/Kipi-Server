@@ -12,20 +12,27 @@ Asegúrate de haber creado el archivo `.env` en la raíz del proyecto guiándote
 Este monorepo fue **implementado desde cero** con arquitectura `pnpm`, lo que permite compilar el dominio, levantar el backend (Hono) y el frontend (Vite/React) en paralelo con un solo comando.
 
 ```bash
-# 1. Asegúrate de estar en la raíz del proyecto
+# 1) Asegúrate de estar en la raíz del proyecto
 # C:\...\HCKMX26-1776486277
 
-# 2. Instalar dependencias (solo si es la primera vez o hay cambios)
+# 2) Instalar dependencias (solo primera vez o si hubo cambios)
 pnpm install
 
-# 3. Encender entorno completo en modo desarrollo
+# 3) Encender entorno completo (API + PWA) en modo desarrollo
 pnpm dev
 ```
 
 > **Verificación Terminal 1**: Espera que la consola despliegue múltiples mensajes de éxito indicando:
-> - `apps/api dev: kipi api listening on http://localhost:8787` (Tu API)
+> - `kipi api listening on http://localhost:8788` (Tu API)
 > - `apps/pwa dev: ➜ Local: http://localhost:5173/` (Tu Frontend PWA)
 > No cierres esta ventana.
+
+---
+
+### URLs útiles
+
+- **PWA (Padres)**: `http://localhost:5173/`
+- **API**: `http://localhost:8788/health`
 
 ---
 
