@@ -44,7 +44,27 @@ En general, valida:
 - **Auth (si aplica)**:
   - `Authorization: Bearer <access_token>`
 
+---
 
+## Checklist antes de subir a Railway (para pruebas móviles)
+
+### Supabase (BD)
+
+- **Tablas/columnas requeridas**: el backend asume el esquema documentado en `docs/supabase_schema.md`.
+- **Verifica que existan estas columnas** (necesarias para el flujo Android ↔ backend ↔ PWA):
+  - `alerts.description`
+  - `devices.api_key_hash`, `devices.last_seen`
+  - `pairing_sessions.claimed_at`, `pairing_sessions.device_id`
+
+En este repo quedaron como migraciones:
+
+- `apps/api/supabase/migrations/007_alerts_description.sql`
+- `apps/api/supabase/migrations/008_device_auth_and_pairing_claim.sql`
+
+### Railway (backend)
+
+- **Build (recomendado)**: `pnpm run build:api` (compila dominio + API antes del arranque; arranque más rápido).
+- **Start**: `pnpm start` (raíz) o `pnpm --filter @kipi/api start`. Si **no** hubo paso de build y falta `dist/server.js`, el script `apps/api/scripts/start.mjs` intentará compilar automáticamente.
 - **Variables de entorno mínimas**:
   - `SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY`
