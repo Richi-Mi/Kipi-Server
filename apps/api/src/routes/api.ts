@@ -155,6 +155,44 @@ function screenTimeKeyFromCategory(category: string): string {
  */
 export const apiRouter = new Hono();
 
+apiRouter.onError((err, c) => {
+  const started = (c.get("req_started_at") as number | undefined) ?? Date.now();
+  const durMs = Math.max(0, Date.now() - started);
+  const path = new URL(c.req.url).pathname;
+  console.error("[kipi/api][500] Unhandled error", {
+    method: c.req.method,
+    path,
+    dur_ms: durMs,
+    message: err instanceof Error ? err.message : String(err),
+  });
+  throw err;
+});
+
+apiRouter.use("*", async (c, next) => {
+  const started = Date.now();
+  c.set("req_started_at", started);
+  const path = new URL(c.req.url).pathname;
+
+  try {
+    await next();
+  } catch (err) {
+    const durMs = Math.max(0, Date.now() - started);
+    console.error("[kipi/api][500] Handler threw", {
+      method: c.req.method,
+      path,
+      dur_ms: durMs,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  } finally {
+    const durMs = Math.max(0, Date.now() - started);
+    const status = c.res?.status ?? 200;
+    const tag = status >= 400 ? "ERR" : "OK";
+    const level = status >= 500 ? "error" : status >= 400 ? "warn" : "log";
+    (console as any)[level](`[kipi/api][${tag}] ${c.req.method} ${path} -> ${status} (${durMs}ms)`);
+  }
+});
+
 function looksLikeMissingRelation(message: string | null | undefined): boolean {
   const m = String(message ?? "").toLowerCase();
   return m.includes("does not exist") || m.includes("relation") || m.includes("schema cache");
