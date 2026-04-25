@@ -7,8 +7,70 @@ import { getSupabaseAdmin } from "../supabase/client.js";
 import { generatePairingOtp, normalizePairingOtp, isValidPairingOtpFormat } from "../pairing/otp.js";
 import { PARENT_DASHBOARD_ASSISTANT_SYSTEM_PROMPT } from "../assistant/masterPrompt.js";
 import { geminiGenerateText } from "../model-providers/gemini.js";
+import crypto from "crypto";
 
 type OwnedMinorAuth = { parentId: string; minorId: string };
+
+type DeviceAuth = { deviceId: string; minorId: string };
+
+function sha256Base64Url(input: string): string {
+  return crypto.createHash("sha256").update(input, "utf8").digest("base64url");
+}
+
+function newDeviceApiKey(): string {
+  // 256-bit random key, encoded URL-safe. Client stores plaintext; DB stores only hash.
+  return crypto.randomBytes(32).toString("base64url");
+}
+
+function readDeviceAuthHeader(c: any): string | null {
+  const raw = c.req.header("Authorization") || "";
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  // Prefer explicit "Device <token>" to avoid confusion with Supabase JWT.
+  const m = /^Device\s+(.+)$/i.exec(trimmed);
+  if (m?.[1]) return m[1].trim();
+  return null;
+}
+
+async function requireDevice(c: any): Promise<
+  | { ok: true; data: DeviceAuth }
+  | { ok: false; response: Response }
+> {
+  const apiKey = readDeviceAuthHeader(c);
+  if (!apiKey || apiKey.length < 16) {
+    return {
+      ok: false,
+      response: writeProblem(
+        c,
+        ApiErrorCode.AUTH_REQUIRED,
+        "Falta Authorization: Device <api_key> (token del dispositivo).",
+      ),
+    };
+  }
+
+  const supabase = getSupabaseAdmin();
+  const apiKeyHash = sha256Base64Url(apiKey);
+  const { data: device, error } = await supabase
+    .from("devices")
+    .select("id,minor_id")
+    .eq("api_key_hash", apiKeyHash)
+    .maybeSingle();
+
+  if (error) {
+    return {
+      ok: false,
+      response: writeProblem(c, ApiErrorCode.INTERNAL_ERROR, error.message || "Error al validar dispositivo."),
+    };
+  }
+  if (!device) {
+    return {
+      ok: false,
+      response: writeProblem(c, ApiErrorCode.FORBIDDEN, "Token de dispositivo inválido o revocado."),
+    };
+  }
+
+  return { ok: true, data: { deviceId: String(device.id), minorId: String(device.minor_id) } };
+}
 
 async function requireOwnedMinor(c: any, minorId: string): Promise<
   | { ok: true; data: OwnedMinorAuth }
@@ -178,7 +240,7 @@ apiRouter.get("/dashboard", async (c) => {
   const minorsList = minors ?? [];
   const alertsByMinor = new Map<string, any[]>();
 
-  // Igual al proyecto fuente: obtener alertas por menor y exponer `fecha` + `asistente_parental` mock.
+  // Obtener alertas por menor y exponer `fecha` + `asistente_parental` mock.
   // (Más compatible con la UI y evita sorpresas con .in() en algunos entornos.)
   try {
     await Promise.all(
@@ -522,11 +584,19 @@ apiRouter.post("/alerts/manual", async (c) => {
     return writeProblem(c, ApiErrorCode.FORBIDDEN, "No tienes permisos sobre este menor.");
   }
 
+  const isManualHelp = typeof record["is_manual_help"] === "boolean" ? record["is_manual_help"] : false;
+
+  const description =
+    typeof record["description"] === "string" && record["description"].trim()
+      ? record["description"].trim().slice(0, 800)
+      : null;
+
   const { data: inserted, error: insertError } = await supabase
     .from("alerts")
     .insert({
       minor_id: minorId,
       app_source: typeof record["app_source"] === "string" ? record["app_source"] : "Manual",
+      description,
       risk_level:
         typeof record["risk_level"] === "number" && [1, 2, 3].includes(record["risk_level"])
           ? record["risk_level"]
@@ -534,7 +604,7 @@ apiRouter.post("/alerts/manual", async (c) => {
       confidence_score: 1,
       sensitive_data_flag: false,
       escalated_to_parent: true,
-      is_manual_help: true,
+      is_manual_help: isManualHelp,
     })
     .select("id")
     .single();
@@ -676,7 +746,7 @@ apiRouter.post("/pairing/confirm-code", async (c) => {
 
   const { data: session, error: sessionError } = await supabase
     .from("pairing_sessions")
-    .select("id,otp,status,expires_at")
+    .select("id,otp,status,expires_at,device_model,fcm_push_token,device_id,minor_id_created,claimed_at")
     .eq("otp", otp)
     .eq("status", "pending")
     .gt("expires_at", nowIso)
@@ -698,24 +768,57 @@ apiRouter.post("/pairing/confirm-code", async (c) => {
     .from("parents")
     .upsert({ id: parentId, email: auth.user.email ?? null }, { onConflict: "id" });
 
-  const { data: minor, error: minorError } = await supabase
-    .from("minors")
-    .insert({
-      parent_id: parentId,
-      name: "Dispositivo vinculado",
-      age_mode: "teen",
-      shared_alert_levels: [1, 2, 3],
-    })
-    .select("id")
-    .single();
+  // Crea el Minor si aún no existe para esta sesión.
+  const existingMinorId = (session as any).minor_id_created ? String((session as any).minor_id_created) : null;
+  let minorId = existingMinorId;
+  if (!minorId) {
+    const { data: minor, error: minorError } = await supabase
+      .from("minors")
+      .insert({
+        parent_id: parentId,
+        name: "Dispositivo vinculado",
+        age_mode: "teen",
+        shared_alert_levels: [1, 2, 3],
+      })
+      .select("id")
+      .single();
 
-  if (minorError || !minor) {
-    return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, minorError?.message || "Error al crear menor.");
+    if (minorError || !minor) {
+      return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, minorError?.message || "Error al crear menor.");
+    }
+    minorId = String(minor.id);
+  }
+
+  // Crea el Device si aún no existe para esta sesión.
+  const existingDeviceId = (session as any).device_id ? String((session as any).device_id) : null;
+  let deviceId = existingDeviceId;
+  if (!deviceId) {
+    const { data: device, error: deviceError } = await supabase
+      .from("devices")
+      .insert({
+        minor_id: minorId,
+        device_name: "Dispositivo vinculado",
+        device_model: (session as any).device_model ?? null,
+        os: "Android",
+        status: "online",
+        battery: 100,
+        last_sync: new Date().toISOString(),
+        device_type: "phone",
+        protection_active: true,
+        api_key_hash: null,
+        last_seen: new Date().toISOString(),
+      })
+      .select("id")
+      .single();
+    if (deviceError || !device) {
+      return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, deviceError?.message || "Error al crear device.");
+    }
+    deviceId = String(device.id);
   }
 
   const { error: updateError } = await supabase
     .from("pairing_sessions")
-    .update({ status: "paired", minor_id_created: minor.id })
+    .update({ status: "paired", minor_id_created: minorId, device_id: deviceId })
     .eq("id", session.id);
 
   if (updateError) {
@@ -728,8 +831,83 @@ apiRouter.post("/pairing/confirm-code", async (c) => {
 
   return c.json({
     ok: true as const,
-    minor_id: minor.id,
+    minor_id: minorId,
+    device_id: deviceId,
     message: "Dispositivo vinculado correctamente.",
+  });
+});
+
+/**
+ * Pairing claim (Android): intercambia session_id + otp por un token de dispositivo.
+ * Esto permite que el dispositivo ingeste métricas/alertas sin usar JWT de Supabase.
+ */
+apiRouter.post("/pairing/claim", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    body = {};
+  }
+  const record = body as Record<string, unknown>;
+  const sessionId = record["session_id"];
+  const otpRaw = record["otp"];
+  if (typeof sessionId !== "string" || !isUuid(sessionId)) {
+    return writeProblem(c, ApiErrorCode.INVALID_UUID, "session_id es obligatorio y debe ser un UUID válido.");
+  }
+  const otp = normalizePairingOtp(otpRaw);
+  if (!isValidPairingOtpFormat(otp, 6)) {
+    return writeProblem(c, ApiErrorCode.TEXT_TOO_SHORT, "otp inválido (6 caracteres A-Z/2-9).");
+  }
+
+  const supabase = getSupabaseAdmin();
+  const nowIso = new Date().toISOString();
+  const { data: session, error } = await supabase
+    .from("pairing_sessions")
+    .select("id,otp,status,expires_at,minor_id_created,device_id,claimed_at")
+    .eq("id", sessionId)
+    .eq("otp", otp)
+    .gt("expires_at", nowIso)
+    .maybeSingle();
+
+  if (error) {
+    return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, error.message || "Error al reclamar pairing.");
+  }
+  if (!session) {
+    return writeProblem(c, ApiErrorCode.FORBIDDEN, "Sesión inválida o expirada.");
+  }
+  if (String((session as any).status) !== "paired") {
+    return writeProblem(c, ApiErrorCode.FORBIDDEN, "Aún no está confirmado por el padre.");
+  }
+  const minorId = (session as any).minor_id_created ? String((session as any).minor_id_created) : null;
+  const deviceId = (session as any).device_id ? String((session as any).device_id) : null;
+  if (!minorId || !deviceId) {
+    return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, "Sesión sin minor_id_created/device_id.");
+  }
+  if ((session as any).claimed_at) {
+    return writeProblem(c, ApiErrorCode.FORBIDDEN, "Esta sesión ya fue reclamada.");
+  }
+
+  const apiKey = newDeviceApiKey();
+  const apiKeyHash = sha256Base64Url(apiKey);
+
+  const [{ error: devErr }, { error: sessErr }] = await Promise.all([
+    supabase.from("devices").update({ api_key_hash: apiKeyHash, last_seen: new Date().toISOString() }).eq("id", deviceId),
+    supabase.from("pairing_sessions").update({ claimed_at: new Date().toISOString() }).eq("id", sessionId),
+  ]);
+
+  if (devErr || sessErr) {
+    return writeProblem(
+      c,
+      ApiErrorCode.INTERNAL_ERROR,
+      devErr?.message || sessErr?.message || "No se pudo finalizar claim.",
+    );
+  }
+
+  return c.json({
+    ok: true as const,
+    device_id: deviceId,
+    minor_id: minorId,
+    api_key: apiKey,
   });
 });
 
@@ -761,6 +939,13 @@ apiRouter.post("/notifications/analyze", async (c) => {
       "text_preview es obligatorio y debe tener contenido suficiente.",
     );
   }
+
+  const description =
+    typeof record["description"] === "string" && record["description"].trim()
+      ? record["description"].trim().slice(0, 800)
+      : typeof textPreview === "string"
+        ? textPreview.trim().slice(0, 800)
+        : null;
 
   const shared = Array.isArray(record["shared_alert_levels"])
     ? (record["shared_alert_levels"] as unknown[]).filter(
@@ -807,6 +992,7 @@ apiRouter.post("/notifications/analyze", async (c) => {
     .insert({
       minor_id: minorId,
       app_source: typeof record["app_source"] === "string" ? record["app_source"] : "Sistema",
+      description,
       risk_level: risk,
       confidence_score: typeof record["confidence_score"] === "number" ? record["confidence_score"] : 0.8,
       sensitive_data_flag: Boolean(record["sensitive_data_flag"]),
@@ -1154,4 +1340,206 @@ apiRouter.post("/assistant/chat", async (c) => {
   }
 
   return c.json({ ok: true as const, reply: result.text, procesado_en_ms: Date.now() - started });
+});
+
+// -------------------------
+// Android device ingestion
+// -------------------------
+
+apiRouter.get("/device/me", async (c) => {
+  const auth = await requireDevice(c);
+  if (!auth.ok) return auth.response;
+  return c.json({ ok: true as const, device_id: auth.data.deviceId, minor_id: auth.data.minorId });
+});
+
+apiRouter.post("/device/heartbeat", async (c) => {
+  const auth = await requireDevice(c);
+  if (!auth.ok) return auth.response;
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    body = {};
+  }
+  const record = body as Record<string, unknown>;
+  const battery = typeof record["battery"] === "number" ? Math.max(0, Math.min(100, Math.round(record["battery"]))) : null;
+  const status = typeof record["status"] === "string" ? record["status"] : null;
+  const protectionActive =
+    typeof record["protection_active"] === "boolean" ? record["protection_active"] : null;
+
+  const patch: Record<string, unknown> = {
+    last_seen: new Date().toISOString(),
+    last_sync: new Date().toISOString(),
+  };
+  if (battery != null) patch["battery"] = battery;
+  if (status === "online" || status === "offline") patch["status"] = status;
+  if (protectionActive != null) patch["protection_active"] = protectionActive;
+
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.from("devices").update(patch).eq("id", auth.data.deviceId);
+  if (error) {
+    return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, error.message || "No se pudo actualizar heartbeat.");
+  }
+  return c.json({ ok: true as const });
+});
+
+apiRouter.post("/device/alerts", async (c) => {
+  const auth = await requireDevice(c);
+  if (!auth.ok) return auth.response;
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    body = {};
+  }
+  const record = body as Record<string, unknown>;
+
+  const riskRaw = typeof record["risk_level"] === "number" ? record["risk_level"] : 2;
+  let risk;
+  try {
+    risk = assertRiskLevel(riskRaw);
+  } catch {
+    return writeProblem(c, ApiErrorCode.TEXT_TOO_SHORT, "risk_level inválido (usa 1, 2 o 3).");
+  }
+
+  const description =
+    typeof record["description"] === "string" && record["description"].trim()
+      ? record["description"].trim().slice(0, 800)
+      : null;
+
+  const confidence =
+    typeof record["confidence_score"] === "number" ? Math.max(0, Math.min(1, record["confidence_score"])) : 0.8;
+  const sensitive = Boolean(record["sensitive_data_flag"]);
+  const appSource = typeof record["app_source"] === "string" && record["app_source"].trim()
+    ? record["app_source"].trim().slice(0, 80)
+    : "Android";
+
+  const supabase = getSupabaseAdmin();
+  const { data: minor, error: minorError } = await supabase
+    .from("minors")
+    .select("shared_alert_levels")
+    .eq("id", auth.data.minorId)
+    .maybeSingle();
+  if (minorError) {
+    return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, minorError.message || "Error al buscar menor.");
+  }
+
+  const shared = Array.isArray((minor as any)?.shared_alert_levels)
+    ? (((minor as any).shared_alert_levels as unknown[]) ?? []).filter((n: unknown): n is number => typeof n === "number")
+    : [1, 2, 3];
+  const decision = decideEscalationToParent(risk, shared);
+
+  const { data: inserted, error } = await supabase
+    .from("alerts")
+    .insert({
+      minor_id: auth.data.minorId,
+      app_source: appSource,
+      description,
+      risk_level: risk,
+      confidence_score: confidence,
+      sensitive_data_flag: sensitive,
+      escalated_to_parent: decision.escalatedToParent,
+      is_manual_help: false,
+    })
+    .select("id")
+    .single();
+
+  if (error || !inserted) {
+    return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, error?.message || "Error al guardar alerta.");
+  }
+
+  return c.json({
+    ok: true as const,
+    alert_id: inserted.id,
+    system_action: { escalated_to_parent: decision.escalatedToParent, reason: decision.reason },
+  });
+});
+
+apiRouter.post("/device/screen-time/batch", async (c) => {
+  const auth = await requireDevice(c);
+  if (!auth.ok) return auth.response;
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    body = {};
+  }
+  const record = body as Record<string, unknown>;
+  const rows = Array.isArray(record["rows"]) ? (record["rows"] as any[]) : [];
+  if (rows.length === 0) {
+    return writeProblem(c, ApiErrorCode.TEXT_TOO_SHORT, "rows es obligatorio (array no vacío).");
+  }
+
+  const normalized = rows
+    .map((r) => ({
+      minor_id: auth.data.minorId,
+      app_name: typeof r?.app_name === "string" ? r.app_name.slice(0, 120) : null,
+      category: typeof r?.category === "string" ? r.category.slice(0, 80) : "Otros",
+      minutes: typeof r?.minutes === "number" ? Math.max(0, Math.round(r.minutes)) : 0,
+      log_date: typeof r?.log_date === "string" ? r.log_date : null,
+    }))
+    .filter((r) => Boolean(r.app_name) && Boolean(r.log_date));
+
+  if (normalized.length === 0) {
+    return writeProblem(c, ApiErrorCode.TEXT_TOO_SHORT, "No hay filas válidas (requiere app_name y log_date).");
+  }
+
+  const supabase = getSupabaseAdmin();
+  // Upsert por unique(minor_id, app_name, log_date)
+  const { error } = await supabase
+    .from("screen_time_logs")
+    .upsert(normalized, { onConflict: "minor_id,app_name,log_date" });
+  if (error) {
+    return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, error.message || "Error al upsert screen_time_logs.");
+  }
+  await supabase
+    .from("devices")
+    .update({ last_seen: new Date().toISOString(), last_sync: new Date().toISOString(), status: "online" })
+    .eq("id", auth.data.deviceId);
+
+  return c.json({ ok: true as const, inserted: normalized.length });
+});
+
+apiRouter.post("/device/app-events/batch", async (c) => {
+  const auth = await requireDevice(c);
+  if (!auth.ok) return auth.response;
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    body = {};
+  }
+  const record = body as Record<string, unknown>;
+  const events = Array.isArray(record["events"]) ? (record["events"] as any[]) : [];
+  if (events.length === 0) {
+    return writeProblem(c, ApiErrorCode.TEXT_TOO_SHORT, "events es obligatorio (array no vacío).");
+  }
+
+  const normalized = events
+    .map((e) => ({
+      minor_id: auth.data.minorId,
+      app_name: typeof e?.app_name === "string" ? e.app_name.slice(0, 120) : null,
+      event_type: typeof e?.event_type === "string" ? e.event_type : "installed",
+      category: typeof e?.category === "string" ? e.category.slice(0, 80) : "Otros",
+      risk_level: typeof e?.risk_level === "string" ? e.risk_level : "low",
+      created_at: typeof e?.created_at === "string" ? e.created_at : new Date().toISOString(),
+    }))
+    .filter((e) => Boolean(e.app_name));
+
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.from("app_events").insert(normalized);
+  if (error) {
+    return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, error.message || "Error al insertar app_events.");
+  }
+
+  await supabase
+    .from("devices")
+    .update({ last_seen: new Date().toISOString(), last_sync: new Date().toISOString(), status: "online" })
+    .eq("id", auth.data.deviceId);
+
+  return c.json({ ok: true as const, inserted: normalized.length });
 });

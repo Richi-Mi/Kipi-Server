@@ -19,6 +19,14 @@ La mayoría de endpoints requieren un **token JWT de Supabase** en el header:
 
 El backend valida el token con Supabase (`supabase.auth.getUser(token)`). Si falta o es inválido, responde error.
 
+### Autenticación de dispositivo (Android nativo)
+
+La app Android **NO debe usar JWT de Supabase**. En su lugar, después del emparejamiento obtiene un **token propio del dispositivo**:
+
+- `Authorization: Device <api_key>`
+
+Ese `api_key` se emite una sola vez en `POST /api/pairing/claim` y el backend guarda **solo un hash** (`devices.api_key_hash`).
+
 ## Formato de errores
 
 Cuando algo falla, la API usa un formato estable tipo **Problem Details** (via `writeProblem(...)`).
@@ -35,6 +43,20 @@ En general, valida:
   - `Accept: application/json`
 - **Auth (si aplica)**:
   - `Authorization: Bearer <access_token>`
+
+
+- **Variables de entorno mínimas**:
+  - `SUPABASE_URL`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+  - `NODE_ENV=production`
+  - `PORT` (Railway lo provee; el server lo lee de env)
+- **Validación rápida post-deploy**:
+  - `GET /health` debe responder `ok: true` y `supabase.configured: true`
+
+### CORS / URLs
+
+- **Android**: normalmente no depende de CORS (no corre en navegador), pero sí requiere HTTPS en prod.
+- **PWA**: si el frontend llama al backend desde otro dominio, asegúrate de permitir ese `Origin`.
 
 ## Endpoints
 
@@ -238,7 +260,7 @@ curl "http://localhost:8788/api/pairing/generate-code" ^
   - `parent_id` (UUID, requerido; debe coincidir con el usuario autenticado)
   - `otp` (string, requerido): 6 caracteres (`A-Z` y `2-9`, sin `I`, `O`, `0`, `1`)
 - **Respuesta (200)**
-  - `{ ok: true, minor_id, message }`
+  - `{ ok: true, minor_id, device_id, message }`
 
 **Ejemplo**
 
@@ -250,6 +272,27 @@ curl "http://localhost:8788/api/pairing/confirm-code" ^
 ```
 
 ---
+
+### Reclamar emparejamiento (dispositivo obtiene su `api_key`)
+
+#### `POST /api/pairing/claim`
+
+- **Auth**: no (pero requiere **`session_id` + `otp`**)
+- **Body (JSON)**:
+  - `session_id` (UUID, requerido): el que regresó `generate-code` (solo lo conoce el dispositivo)
+  - `otp` (string, requerido): el código que ve el padre
+- **Respuesta (200)**
+  - `{ ok: true, device_id, minor_id, api_key }`
+
+**Ejemplo**
+
+```bash
+curl "http://localhost:8788/api/pairing/claim" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"session_id\":\"UUID_DE_SESSION\",\"otp\":\"ABC234\"}"
+```
+
+> Guarda `api_key` en el Keystore/EncryptedSharedPreferences. Es el secreto con el que el dispositivo se autentica en `/api/device/*`.
 
 ### Analizar “notificación” (guarda alerta)
 
@@ -352,4 +395,93 @@ curl "http://localhost:8788/api/assistant/chat" ^
   -H "Content-Type: application/json" ^
   -d "{\"message\":\"¿Qué puedo hacer si mi hijo recibe mensajes raros?\"}"
 ```
+
+---
+
+## Endpoints para App Android (ingesta de datos)
+
+Estos endpoints son para que el **dispositivo** envíe datos al backend. Se autentican con:
+
+- `Authorization: Device <api_key>`
+
+### Identidad del dispositivo (debug)
+
+#### `GET /api/device/me`
+
+- **Auth**: sí (Device)
+- **Respuesta**: `{ ok: true, device_id, minor_id }`
+
+### Heartbeat (estado / batería / protección)
+
+#### `POST /api/device/heartbeat`
+
+- **Auth**: sí (Device)
+- **Body (JSON)** (opcionales):
+  - `battery` (number 0–100)
+  - `status` (`"online"` | `"offline"`)
+  - `protection_active` (boolean)
+- **Respuesta**: `{ ok: true }`
+
+### Enviar alerta (IA del dispositivo → dashboard)
+
+#### `POST /api/device/alerts`
+
+- **Auth**: sí (Device)
+- **Body (JSON)**:
+  - `app_source` (string, opcional; default `"Android"`)
+  - `risk_level` (1|2|3, requerido)
+  - `confidence_score` (0–1, opcional; default `0.8`)
+  - `sensitive_data_flag` (boolean, opcional)
+  - `description` (string, opcional; recomendado)
+- **Respuesta (200)**:
+  - `{ ok: true, alert_id, system_action: { escalated_to_parent, reason } }`
+
+**Ejemplo**
+
+```bash
+curl "http://localhost:8788/api/device/alerts" ^
+  -H "Authorization: Device API_KEY" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"app_source\":\"WhatsApp\",\"risk_level\":3,\"confidence_score\":0.91,\"sensitive_data_flag\":true,\"description\":\"Solicita dirección y foto\"}"
+```
+
+### Enviar tiempo de pantalla (batch diario)
+
+#### `POST /api/device/screen-time/batch`
+
+- **Auth**: sí (Device)
+- **Body (JSON)**:
+  - `rows` (array, requerido):
+    - `app_name` (string)
+    - `category` (string)
+    - `minutes` (number)
+    - `log_date` (YYYY-MM-DD)
+- **Respuesta**: `{ ok: true, inserted }`
+
+### Enviar eventos de apps (batch)
+
+#### `POST /api/device/app-events/batch`
+
+- **Auth**: sí (Device)
+- **Body (JSON)**:
+  - `events` (array, requerido):
+    - `app_name` (string)
+    - `event_type` (`installed`|`updated`|`uninstalled`)
+    - `category` (string)
+    - `risk_level` (`low`|`medium`|`high`)
+    - `created_at` (ISO8601, opcional)
+- **Respuesta**: `{ ok: true, inserted }`
+
+---
+
+## Flujo recomendado (Android ↔ Backend ↔ PWA)
+
+1) **Android** llama `POST /api/pairing/generate-code` → recibe `session_id` + `otp`  
+2) **Padre (PWA)** confirma con `POST /api/pairing/confirm-code` (JWT Supabase) → se crea `minor` + `device`  
+3) **Android** reclama con `POST /api/pairing/claim` (session_id + otp) → recibe `api_key`  
+4) **Android** usa `Authorization: Device <api_key>` para:
+   - mandar alertas (`/api/device/alerts`)
+   - mandar métricas (`/api/device/screen-time/batch`, `/api/device/app-events/batch`)
+   - mandar heartbeat (`/api/device/heartbeat`)
+5) **PWA** solo lee dashboard desde Supabase vía backend (`GET /api/dashboard`, etc.)
 

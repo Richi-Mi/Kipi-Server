@@ -45,7 +45,16 @@ export const AuthBranding: React.FC = () => {
       <div className="relative z-10">
         <div className="flex items-center gap-3 mb-14">
           <div className="w-10 h-10 rounded-xl bg-primary-foreground/15 border border-primary-foreground/20 flex items-center justify-center">
-            <ShieldCheck className="w-5 h-5 text-primary-foreground" />
+            <img
+              src="/kipisafe/logo.svg"
+              alt="Kipi Safe"
+              className="w-6 h-6 object-contain"
+              onError={(e) => {
+                // Fallback visual si por alguna razón no carga el asset público
+                (e.currentTarget as HTMLImageElement).style.display = "none";
+              }}
+            />
+            <ShieldCheck className="w-5 h-5 text-primary-foreground [img[style*='display: none']+&]:block hidden" />
           </div>
           <div>
             <span className="font-heading font-bold text-primary-foreground text-xl leading-none tracking-wider">
@@ -99,7 +108,7 @@ export const AuthBranding: React.FC = () => {
       </div>
 
       {/* Bottom: Testimonial */}
-      <div className="relative z-10">
+      <div className="relative z-10 mt-10">
         <div className="bg-primary-foreground/10 rounded-2xl p-5 border border-primary-foreground/10 backdrop-blur-sm">
           <Quote className="w-6 h-6 text-primary-foreground/35 mb-3" />
           <p className="text-primary-foreground/85 text-sm leading-relaxed mb-4">

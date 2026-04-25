@@ -123,7 +123,7 @@ export function DeviceManagement({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-primary-subtle flex items-center justify-center">
-            <Smartphone className="w-4 h-4 text-primary" />
+            <img src="/kipisafe/logo.svg" alt="Kipi Safe" className="w-5 h-5 object-contain" />
           </div>
           <div>
             <h3 className="font-display font-bold text-foreground text-sm">Dispositivos</h3>
