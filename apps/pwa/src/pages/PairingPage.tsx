@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { REGEXP_ONLY_DIGITS_AND_CHARS } from "input-otp";
 import { cn } from "@/lib/utils";
-import { apiUrl } from "@/lib/api";
+import { apiBaseLabel, apiUrl, messageFromApiJson } from "@/lib/api";
 
 type ConfirmCodeResponse =
   | { ok: true; minor_id: string; message?: string }
@@ -57,24 +57,33 @@ export default function PairingPage() {
         body: JSON.stringify({ otp: normalizedOtp, parent_id: user.id }),
       });
 
-      const data = (await res.json().catch(() => null)) as ConfirmCodeResponse | null;
+      const data = (await res.json().catch(() => null)) as ConfirmCodeResponse | Record<string, unknown> | null;
       if (!res.ok || !data || !("ok" in data) || data.ok !== true) {
-        const msg =
-          (data && "message" in data && typeof data.message === "string" && data.message) ||
-          "No se pudo validar el código. Verifica que esté correcto y no haya expirado.";
+        const msg = messageFromApiJson(
+          data,
+          res,
+          "No se pudo validar el código. ¿Misma API que el móvil? ¿Letras correctas (sin O/I/0/1)?",
+        );
         toast.error(msg);
         setPairingState("idle");
         return;
       }
 
-      setPairedMinorId(data.minor_id);
-      toast.success(data.message || "Dispositivo vinculado correctamente.");
+      const okData = data as Extract<ConfirmCodeResponse, { ok: true }>;
+      setPairedMinorId(typeof okData.minor_id === "string" ? okData.minor_id : null);
+      toast.success(
+        typeof okData.message === "string" && okData.message.trim()
+          ? okData.message
+          : "Dispositivo vinculado correctamente.",
+      );
       await refreshBackendState?.();
       await completePairing?.();
       setPairingState("success");
       window.setTimeout(() => navigate("/dashboard"), 900);
     } catch (err) {
-      toast.error("Error de red al confirmar el código.");
+      toast.error(
+        `Error de red al confirmar (${apiUrl("/api/pairing/confirm-code")}). ¿La API está en marcha y la base URL coincide con el celular?`,
+      );
       console.error(err);
       setPairingState("idle");
     } finally {
@@ -264,6 +273,9 @@ export default function PairingPage() {
                     <p className="mt-4 text-xs text-center text-muted-foreground leading-relaxed">
                       El código lo genera la app en el celular del menor (válido 15 minutos). Solo letras y
                       números (sin O, I, 0 ni 1).
+                    </p>
+                    <p className="mt-2 text-[11px] text-center text-muted-foreground/90 font-mono break-all leading-snug">
+                      API PWA: {apiBaseLabel()}
                     </p>
                   </div>
 

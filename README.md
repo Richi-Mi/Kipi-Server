@@ -65,7 +65,7 @@ cd HCKMX26-1776486277
 
 ### Configurar variables de entorno (`.env`)
 
-Crea un archivo `.env` en la **raíz** del repositorio (no lo publiques). Variables esperadas:
+Crea un archivo `.env` en la **raíz** del repositorio (no lo publiques). Vite (PWA) también lee `VITE_*` desde esa raíz. Para el flujo **móvil + PWA vinculación**, revisa **`docs/vinculacion.md`**. Variables esperadas:
 
 ```bash
 # === PWA (Vite) ===

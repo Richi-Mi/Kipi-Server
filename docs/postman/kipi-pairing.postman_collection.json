@@ -1,0 +1,112 @@
+{
+  "info": {
+    "name": "Kipi Safe — Vinculación (pairing)",
+    "description": "Flujo: generate-code → confirm-code → claim → device/me. Usa environment `base_url` (ej. http://127.0.0.1:8788) y `parent_id` demo 00000000-0000-4000-8000-000000000001.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://127.0.0.1:8788" },
+    { "key": "parent_id", "value": "00000000-0000-4000-8000-000000000001" },
+    { "key": "session_id", "value": "" },
+    { "key": "otp", "value": "" },
+    { "key": "minor_id", "value": "" },
+    { "key": "device_id", "value": "" },
+    { "key": "api_key", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "0 — GET health check_db (opcional)",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/health?check_db=1"
+      }
+    },
+    {
+      "name": "1 — POST pairing generate-code (simula móvil)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const j = pm.response.json();",
+              "if (j.session_id) pm.collectionVariables.set('session_id', j.session_id);",
+              "if (j.otp) pm.collectionVariables.set('otp', j.otp);",
+              "pm.test('ok', () => pm.expect(j.ok).to.be.true);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"device_model\": \"Postman\",\n  \"fcm_push_token\": null\n}"
+        },
+        "url": "{{base_url}}/api/pairing/generate-code"
+      }
+    },
+    {
+      "name": "2 — POST pairing confirm-code (simula padre)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const j = pm.response.json();",
+              "if (j.minor_id) pm.collectionVariables.set('minor_id', j.minor_id);",
+              "if (j.device_id) pm.collectionVariables.set('device_id', j.device_id);",
+              "pm.test('ok', () => pm.expect(j.ok).to.be.true);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"parent_id\": \"{{parent_id}}\",\n  \"otp\": \"{{otp}}\"\n}"
+        },
+        "url": "{{base_url}}/api/pairing/confirm-code"
+      }
+    },
+    {
+      "name": "3 — POST pairing claim (simula móvil)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const j = pm.response.json();",
+              "if (j.api_key) pm.collectionVariables.set('api_key', j.api_key);",
+              "pm.test('ok', () => pm.expect(j.ok).to.be.true);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"session_id\": \"{{session_id}}\",\n  \"otp\": \"{{otp}}\"\n}"
+        },
+        "url": "{{base_url}}/api/pairing/claim"
+      }
+    },
+    {
+      "name": "4 — GET device me (opcional)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Device {{api_key}}" }
+        ],
+        "url": "{{base_url}}/api/device/me?minor_id={{minor_id}}&device_id={{device_id}}"
+      }
+    }
+  ]
+}

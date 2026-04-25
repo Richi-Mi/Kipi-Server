@@ -14,6 +14,8 @@ const apiProxyTarget =
   "http://127.0.0.1:8788";
 
 export default defineConfig({
+  /** Una sola `.env` en la raíz del monorepo (junto a `apps/`, `packages/`). */
+  envDir: path.resolve(dirname, "../.."),
   plugins: [
     react(),
     VitePWA({
@@ -62,6 +64,17 @@ export default defineConfig({
   preview: {
     host: true,
     port: previewPort,
+    // Igual que `server`: `vite preview` puede probar la PWA contra la API local sin CORS.
+    proxy: {
+      "/api": {
+        target: apiProxyTarget,
+        changeOrigin: true,
+      },
+      "/health": {
+        target: apiProxyTarget,
+        changeOrigin: true,
+      },
+    },
   },
   server: {
     proxy: {

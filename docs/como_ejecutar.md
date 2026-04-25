@@ -36,6 +36,17 @@ pnpm dev
 
 ---
 
+### Probar vinculación (PWA + Android) en local
+
+1. Arranca `pnpm dev` (API + Vite). Confirma que el móvil (emulador o físico) usa **exactamente** la misma base que el proxy de Vite, por defecto `http://127.0.0.1:8788` (o la IP de tu PC en la LAN + `:8788`).
+2. En el móvil: generar código (`POST /api/pairing/generate-code`).
+3. En la PWA: ruta **Vincular** e introduce el OTP de 6 caracteres.
+4. En el móvil: **después** del paso 3, llamar `POST /api/pairing/claim` con `session_id` y `otp`.
+
+Si el botón de vincular “no conecta”, revisa el texto **API PWA** bajo el campo de código y la guía **`docs/vinculacion.md`** (causa típica: PWA hablando con otra URL que la del móvil).
+
+---
+
 ### Criterio de Éxito en QA (Autenticación Base - Fase 1)
 
 El proyecto ya tiene **implementado desde cero** el esqueleto visual de la página de Login y el enrutamiento protegido.

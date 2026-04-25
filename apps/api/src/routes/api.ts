@@ -42,6 +42,27 @@ function newDeviceApiKey(): string {
   return crypto.randomBytes(32).toString("base64url");
 }
 
+/** `parents.id` suele tener FK a `auth.users`; crea el usuario Auth si aún no existe (modo demo / pairing). */
+async function ensureParentUserForPairing(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  parentId: string,
+): Promise<{ email: string; error?: string }> {
+  const email = `parent-${parentId}@kipi-pairing.local`;
+  const password = crypto.randomBytes(24).toString("base64url") + "Aa1!";
+  const { error } = await supabase.auth.admin.createUser({
+    id: parentId,
+    email,
+    password,
+    email_confirm: true,
+  });
+  if (!error) return { email };
+  const m = (error.message || "").toLowerCase();
+  if (m.includes("already") || m.includes("exists") || m.includes("registered")) {
+    return { email };
+  }
+  return { email, error: error.message || "No se pudo asegurar usuario Auth para este padre." };
+}
+
 async function requireDevice(c: any): Promise<
   | { ok: true; data: DeviceAuth }
   | { ok: false; response: Response }
@@ -717,9 +738,27 @@ apiRouter.post("/pairing/confirm-code", async (c) => {
     return writeProblem(c, ApiErrorCode.FORBIDDEN, "Código inválido o expirado.");
   }
 
-  await supabase
-    .from("parents")
-    .upsert({ id: parentId, email: null }, { onConflict: "id" });
+  const ensured = await ensureParentUserForPairing(supabase, parentId);
+  if (ensured.error) {
+    return writeProblem(c, ApiErrorCode.INTERNAL_ERROR, ensured.error);
+  }
+
+  const { error: parentUpsertError } = await supabase.from("parents").upsert(
+    {
+      id: parentId,
+      email: ensured.email,
+      safe_days_streak: 0,
+      completed_missions: [],
+    },
+    { onConflict: "id" },
+  );
+  if (parentUpsertError) {
+    return writeProblem(
+      c,
+      ApiErrorCode.INTERNAL_ERROR,
+      parentUpsertError.message || "No se pudo asegurar el perfil del padre (parents).",
+    );
+  }
 
   // Crea el Minor si aún no existe para esta sesión.
   const existingMinorId = (session as any).minor_id_created ? String((session as any).minor_id_created) : null;

@@ -2,30 +2,65 @@
 
 Esta guía documenta **los endpoints HTTP que consume el cliente móvil** (PWA o app) y cómo usarlos.
 
+## Estado actual del repositorio (importante)
+
+- **Misma API para móvil y PWA**: el flujo de emparejamiento falla si ambos clientes no apuntan a la **misma** URL de API y por tanto a la **misma** instancia de Supabase. Resumen y checklist: **`docs/vinculacion.md`**.
+- **PWA y variables `VITE_*`**: Vite está configurado con `envDir` en la **raíz del monorepo**, de modo que el mismo `.env` que usa la API puede definir `VITE_API_BASE_URL` para builds de la PWA.
+- **JWT Supabase en la API**: en el código actual de `apps/api` **no** se valida `Authorization: Bearer` en las rutas parentales listadas abajo; el prototipo usa `parent_id` o `minor_id` en query/body. La autenticación que **sí** se exige hoy es **`Authorization: Device <api_key>`** en `/api/device/*` (salvo `RELAX_DEVICE_AUTH=1`).
+- **Emparejamiento (`confirm-code`)**: si el `parent_id` aún no existe en `auth.users`, la API intenta crearlo con **Admin API** y luego hace `upsert` en `parents` (email sintético `parent-{uuid}@kipi-pairing.local`, racha y misiones en cero). Así el flujo demo/PWA no requiere SQL manual en Supabase.
+
+## Cómo usar cada endpoint (resumen)
+
+Usa siempre la misma **`{BASE_URL}`** en PWA, Android y pruebas (ver `docs/vinculacion.md`).
+
+| Orden | Método | Ruta | Cliente típico | Auth en este prototipo | Qué enviar (mínimo) |
+|------|--------|------|----------------|--------------------------|---------------------|
+| — | `GET` | `/health` | Cualquiera | No | Opcional: `?check_db=1` |
+| — | `GET` | `/api/dashboard` | PWA | No | Query `parent_id` (UUID) |
+| — | `GET` | `/api/screen-time` | PWA | No | Query `minor_id` |
+| — | `GET` | `/api/apps/recent` | PWA | No | Query `minor_id` |
+| — | `GET` | `/api/devices` | PWA | No | Query `minor_id` |
+| — | `GET` | `/api/ai/stats` | PWA | No | Query `parent_id` |
+| — | `POST` | `/api/alerts/manual` | PWA | No | JSON: `minor_id`; opcionales `app_source`, `risk_level`, `description`, `is_manual_help` |
+| — | `PATCH` | `/api/minors/agreement` | PWA | No | JSON: `minor_id`, `shared_alert_levels` |
+| 1 | `POST` | `/api/pairing/generate-code` | Android / Postman | No | JSON opcional: `device_model`, `fcm_push_token` |
+| 2 | `POST` | `/api/pairing/confirm-code` | PWA / Postman | No | JSON: `parent_id`, `otp` (6 chars) |
+| 3 | `POST` | `/api/pairing/claim` | Android / Postman | No | JSON: `session_id`, `otp` |
+| — | `POST` | `/api/notifications/analyze` | PWA (o servidor) | No | JSON: `minor_id`, `text_preview` (+ campos opcionales de riesgo/nube) |
+| — | `GET` | `/api/gamification/streak` | PWA | No | Query `parent_id` |
+| — | `GET` | `/api/gamification/missions` | PWA | No | Query `parent_id` |
+| — | `POST` | `/api/gamification/missions/complete` | PWA | No | JSON: `parent_id`, `mission_id` |
+| — | `POST` | `/api/assistant/chat` | PWA | No | JSON: `parent_id`, `message` (≥3 chars); opcional `ui_context` |
+| — | `GET` | `/api/device/me` | Android | **Device** | Query `minor_id`, `device_id` |
+| — | `POST` | `/api/device/heartbeat` | Android | **Device** | JSON opcional: `battery`, `status`, `protection_active` |
+| — | `POST` | `/api/device/alerts` | Android | **Device** | JSON: `risk_level`; opcionales `app_source`, `description`, etc. |
+| — | `POST` | `/api/device/screen-time/batch` | Android | **Device** | JSON: `rows[]` |
+| — | `POST` | `/api/device/app-events/batch` | Android | **Device** | JSON: `events[]` |
+
+Los ejemplos con `Authorization: Bearer` más abajo son **opcionales** (compatibilidad futura); hoy la API **no** rechaza si falta el Bearer en esas rutas.
+
 ## Base URL
 
-- **Local (dev)**: `http://localhost:8788` (puede cambiar según `PORT`)
+- **API local (dev típico)**: `http://localhost:8788` o `http://127.0.0.1:8788` (según `PORT`)
 - **Prefijo API**: `GET/POST/PATCH {BASE_URL}/api/...`
 
 Además existe un endpoint de estado:
 
-- `GET {BASE_URL}/health`
+- `GET {BASE_URL}/health` (opcional: `GET {BASE_URL}/health?check_db=1` para probar consulta a Supabase)
 
 ## Autenticación
 
-La mayoría de endpoints requieren un **token JWT de Supabase** en el header:
+### Rutas parentales (PWA / dashboard)
 
-- `Authorization: Bearer <access_token>`
+Hoy son **públicas a nivel HTTP**: basta con UUIDs válidos en query o body. **No confíes en esto en producción**; conviene validar JWT de Supabase (o sesión propia) y comprobar que el token corresponde al `parent_id` y que cada `minor_id` es hijo de ese padre.
 
-El backend valida el token con Supabase (`supabase.auth.getUser(token)`). Si falta o es inválido, responde error.
+### Rutas de dispositivo (`/api/device/*`)
 
-### Autenticación de dispositivo (Android nativo)
-
-La app Android **NO debe usar JWT de Supabase**. En su lugar, después del emparejamiento obtiene un **token propio del dispositivo**:
+La app del menor **no** usa Bearer de Supabase. Tras `POST /api/pairing/claim` guarda el secreto y envía:
 
 - `Authorization: Device <api_key>`
 
-Ese `api_key` se emite una sola vez en `POST /api/pairing/claim` y el backend guarda **solo un hash** (`devices.api_key_hash`).
+El servidor solo almacena **hash** (`devices.api_key_hash`). En depuración local puedes definir `RELAX_DEVICE_AUTH=1` para omitir el header (**nunca** en producción).
 
 ## Formato de errores
 
@@ -33,16 +68,17 @@ Cuando algo falla, la API usa un formato estable tipo **Problem Details** (via `
 
 En general, valida:
 
-- UUIDs en query/body (`parent_id`, `minor_id`)
-- Permisos: el `parent_id` debe coincidir con el usuario autenticado, y el menor (`minor_id`) debe pertenecer al padre autenticado.
+- UUIDs en query/body (`parent_id`, `minor_id`, `session_id`, `device_id`)
+- En producción endurecida: permisos entre padre, menores y dispositivos (hoy no se exige Bearer).
 
 ## Headers recomendados (cliente móvil)
 
 - **JSON**:
   - `Content-Type: application/json`
   - `Accept: application/json`
-- **Auth (si aplica)**:
-  - `Authorization: Bearer <access_token>`
+- **Auth**:
+  - Dispositivo: `Authorization: Device <api_key>`
+  - PWA (opcional hoy): `Authorization: Bearer <access_token>` si ya integras Supabase Auth en el cliente.
 
 ---
 
@@ -50,33 +86,57 @@ En general, valida:
 
 ### Supabase (BD)
 
-- **Tablas/columnas requeridas**: el backend asume el esquema documentado en `docs/supabase_schema.md`.
-- **Verifica que existan estas columnas** (necesarias para el flujo Android ↔ backend ↔ PWA):
-  - `alerts.description`
-  - `devices.api_key_hash`, `devices.last_seen`
-  - `pairing_sessions.claimed_at`, `pairing_sessions.device_id`
-
-En este repo quedaron como migraciones:
-
-- `apps/api/supabase/migrations/007_alerts_description.sql`
-- `apps/api/supabase/migrations/008_device_auth_and_pairing_claim.sql`
+- **Esquema**: alinea tablas y columnas con `docs/supabase_schema.md` (incluye `pairing_sessions`, `devices.api_key_hash`, `alerts.description`, etc.). Aplica migraciones o SQL en el proyecto Supabase que use la API.
 
 ### Railway (backend)
 
 - **Build (recomendado)**: `pnpm run build:api` (compila dominio + API antes del arranque; arranque más rápido).
-- **Start**: `pnpm start` (raíz) o `pnpm --filter @kipi/api start`. Si **no** hubo paso de build y falta `dist/server.js`, el script `apps/api/scripts/start.mjs` intentará compilar automáticamente.
+- **Start**: `pnpm start` (raíz, incluye PWA+API) o solo API: `pnpm --filter @kipi/api start`. Si falta `dist/server.js`, `apps/api/scripts/start.mjs` puede intentar compilar al arrancar.
 - **Variables de entorno mínimas**:
   - `SUPABASE_URL`
-  - `SUPABASE_SERVICE_ROLE_KEY`
+  - `SUPABASE_SERVICE_ROLE_KEY` (solo servidor; nunca en la PWA)
   - `NODE_ENV=production`
-  - `PORT` (Railway lo provee; el server lo lee de env)
+  - `PORT` (Railway lo suele inyectar)
+  - Opcional: `GEMINI_API_KEY`, `GEMINI_MODEL` (notificaciones/asistente con nube)
 - **Validación rápida post-deploy**:
-  - `GET /health` debe responder `ok: true` y `supabase.configured: true`
+  - `GET https://<tu-host>/health?check_db=1` → `ok: true`, `database.ok: true` si Supabase responde.
 
 ### CORS / URLs
 
-- **Android**: normalmente no depende de CORS (no corre en navegador), pero sí requiere HTTPS en prod.
-- **PWA**: si el frontend llama al backend desde otro dominio, asegúrate de permitir ese `Origin`.
+- **Android**: no usa CORS; en producción usa **HTTPS** y la misma base URL que la PWA (`docs/vinculacion.md`).
+- **PWA**: si el front está en otro dominio que el de la API, configura CORS en Hono para ese `Origin`, o sirve la PWA detrás del mismo dominio con proxy.
+
+---
+
+## Producción: qué subir y en qué orden
+
+No puedo desplegar por ti desde este entorno; sigue estos pasos en tu cuenta (Railway / Supabase ya enlazados).
+
+1. **Supabase**  
+   - Confirma que el esquema coincide con `docs/supabase_schema.md`.  
+   - La clave **service role** solo vive en variables de Railway (backend).
+
+2. **API en Railway**  
+   - Conecta el repo o publica imagen; directorio raíz del monorepo.  
+   - Comando de build: `pnpm run build:api` (o el que uses en CI).  
+   - Comando de arranque: `pnpm --filter @kipi/api start` (tras build).  
+   - Variables: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NODE_ENV=production`, `GEMINI_*` si aplica.  
+   - **No** definas `RELAX_DEVICE_AUTH` en producción.
+
+3. **PWA (build estático)**  
+   - En la raíz del monorepo, antes de `pnpm run build:pwa`, define en `.env` (o en el proveedor de CI):  
+     `VITE_API_BASE_URL=https://<tu-servicio-api>.up.railway.app`  
+     (sin barra final; las rutas del cliente deben seguir siendo `/api/...` como en `apps/pwa/src/lib/api.ts`).  
+   - Sube el contenido de `apps/pwa/dist` a **Netlify**, **Vercel**, **Cloudflare Pages**, o el hosting que uses; o sirve la PWA desde el mismo host si montas estáticos.
+
+4. **Comprobación final**  
+   - Desde el móvil o Postman: misma URL base que la PWA.  
+   - `GET /health?check_db=1` → OK.  
+   - Flujo pairing 1→2→3 (colección en `docs/postman/kipi-pairing.postman_collection.json`).  
+   - Abre la PWA, confirma que la etiqueta de API base coincide con Railway (`apiBaseLabel()` en vinculación).
+
+5. **Git**  
+   - `git add`, `commit`, `push` a la rama que Railway despliega; espera el deploy verde y repite el paso 4.
 
 ## Endpoints
 
@@ -99,9 +159,9 @@ curl "http://localhost:8788/health"
 
 #### `GET /api/dashboard?parent_id={PARENT_UUID}`
 
-- **Auth**: sí (`Authorization: Bearer ...`)
+- **Auth**: no en el prototipo actual (solo valida UUID de `parent_id`)
 - **Query**
-  - `parent_id` (UUID, requerido): debe ser el mismo que `auth.user.id`
+  - `parent_id` (UUID, requerido): en producción debería coincidir con el usuario autenticado
 - **Respuesta (200)**
   - `{ ok: true, minors: [...] }`
   - Cada menor incluye:
@@ -112,18 +172,17 @@ curl "http://localhost:8788/health"
 **Ejemplo (curl)**
 
 ```bash
-curl "http://localhost:8788/api/dashboard?parent_id=UUID_DEL_PADRE" ^
-  -H "Authorization: Bearer ACCESS_TOKEN"
+curl "http://localhost:8788/api/dashboard?parent_id=UUID_DEL_PADRE"
 ```
 
 **Ejemplo (`fetch`)**
 
 ```js
-const res = await fetch(`${BASE_URL}/api/dashboard?parent_id=${parentId}`, {
-  headers: { Authorization: `Bearer ${accessToken}` },
-});
+const res = await fetch(`${BASE_URL}/api/dashboard?parent_id=${parentId}`);
 const data = await res.json();
 ```
+
+*(Más adelante podrás añadir `Authorization: Bearer` cuando la API valide JWT.)*
 
 ---
 
@@ -131,7 +190,7 @@ const data = await res.json();
 
 #### `GET /api/screen-time?minor_id={MINOR_UUID}`
 
-- **Auth**: sí (y el menor debe pertenecer al padre autenticado)
+- **Auth**: no en el prototipo actual (solo valida UUID de `minor_id`)
 - **Query**
   - `minor_id` (UUID, requerido)
 - **Respuesta (200)**
@@ -141,8 +200,7 @@ const data = await res.json();
 **Ejemplo**
 
 ```bash
-curl "http://localhost:8788/api/screen-time?minor_id=UUID_DEL_MENOR" ^
-  -H "Authorization: Bearer ACCESS_TOKEN"
+curl "http://localhost:8788/api/screen-time?minor_id=UUID_DEL_MENOR"
 ```
 
 ---
@@ -151,7 +209,7 @@ curl "http://localhost:8788/api/screen-time?minor_id=UUID_DEL_MENOR" ^
 
 #### `GET /api/apps/recent?minor_id={MINOR_UUID}`
 
-- **Auth**: sí (y el menor debe pertenecer al padre autenticado)
+- **Auth**: no en el prototipo actual
 - **Query**
   - `minor_id` (UUID, requerido)
 - **Respuesta (200)**
@@ -161,8 +219,7 @@ curl "http://localhost:8788/api/screen-time?minor_id=UUID_DEL_MENOR" ^
 **Ejemplo**
 
 ```bash
-curl "http://localhost:8788/api/apps/recent?minor_id=UUID_DEL_MENOR" ^
-  -H "Authorization: Bearer ACCESS_TOKEN"
+curl "http://localhost:8788/api/apps/recent?minor_id=UUID_DEL_MENOR"
 ```
 
 ---
@@ -171,7 +228,7 @@ curl "http://localhost:8788/api/apps/recent?minor_id=UUID_DEL_MENOR" ^
 
 #### `GET /api/devices?minor_id={MINOR_UUID}`
 
-- **Auth**: sí (y el menor debe pertenecer al padre autenticado)
+- **Auth**: no en el prototipo actual
 - **Query**
   - `minor_id` (UUID, requerido)
 - **Respuesta (200)**
@@ -180,8 +237,7 @@ curl "http://localhost:8788/api/apps/recent?minor_id=UUID_DEL_MENOR" ^
 **Ejemplo**
 
 ```bash
-curl "http://localhost:8788/api/devices?minor_id=UUID_DEL_MENOR" ^
-  -H "Authorization: Bearer ACCESS_TOKEN"
+curl "http://localhost:8788/api/devices?minor_id=UUID_DEL_MENOR"
 ```
 
 ---
@@ -190,7 +246,7 @@ curl "http://localhost:8788/api/devices?minor_id=UUID_DEL_MENOR" ^
 
 #### `GET /api/ai/stats?parent_id={PARENT_UUID}`
 
-- **Auth**: sí (el `parent_id` debe ser el usuario autenticado)
+- **Auth**: no en el prototipo actual
 - **Query**
   - `parent_id` (UUID, requerido)
 - **Respuesta (200)**
@@ -199,8 +255,7 @@ curl "http://localhost:8788/api/devices?minor_id=UUID_DEL_MENOR" ^
 **Ejemplo**
 
 ```bash
-curl "http://localhost:8788/api/ai/stats?parent_id=UUID_DEL_PADRE" ^
-  -H "Authorization: Bearer ACCESS_TOKEN"
+curl "http://localhost:8788/api/ai/stats?parent_id=UUID_DEL_PADRE"
 ```
 
 ---
@@ -209,7 +264,7 @@ curl "http://localhost:8788/api/ai/stats?parent_id=UUID_DEL_PADRE" ^
 
 #### `POST /api/alerts/manual`
 
-- **Auth**: sí
+- **Auth**: no en el prototipo actual
 - **Body (JSON)**:
   - `minor_id` (UUID, requerido)
   - `app_source` (string, opcional; default `"Manual"`)
@@ -221,7 +276,6 @@ curl "http://localhost:8788/api/ai/stats?parent_id=UUID_DEL_PADRE" ^
 
 ```bash
 curl "http://localhost:8788/api/alerts/manual" ^
-  -H "Authorization: Bearer ACCESS_TOKEN" ^
   -H "Content-Type: application/json" ^
   -d "{\"minor_id\":\"UUID_DEL_MENOR\",\"app_source\":\"WhatsApp\",\"risk_level\":3}"
 ```
@@ -232,7 +286,7 @@ curl "http://localhost:8788/api/alerts/manual" ^
 
 #### `PATCH /api/minors/agreement`
 
-- **Auth**: sí
+- **Auth**: no en el prototipo actual
 - **Body (JSON)**:
   - `minor_id` (UUID, requerido)
   - `shared_alert_levels` (array de int, opcional; si viene vacío se normaliza a `[1,2,3]`)
@@ -243,7 +297,6 @@ curl "http://localhost:8788/api/alerts/manual" ^
 
 ```bash
 curl -X PATCH "http://localhost:8788/api/minors/agreement" ^
-  -H "Authorization: Bearer ACCESS_TOKEN" ^
   -H "Content-Type: application/json" ^
   -d "{\"minor_id\":\"UUID_DEL_MENOR\",\"shared_alert_levels\":[2,3]}"
 ```
@@ -275,9 +328,9 @@ curl "http://localhost:8788/api/pairing/generate-code" ^
 
 #### `POST /api/pairing/confirm-code`
 
-- **Auth**: sí (padre autenticado)
+- **Auth**: no. El cuerpo incluye `parent_id` (UUID) y `otp`. Si ese padre no existía en `auth.users`, la API lo crea con Admin API y hace `upsert` en `parents` antes de crear `minors` / `devices` (ver tabla arriba).
 - **Body (JSON)**:
-  - `parent_id` (UUID, requerido; debe coincidir con el usuario autenticado)
+  - `parent_id` (UUID, requerido)
   - `otp` (string, requerido): 6 caracteres (`A-Z` y `2-9`, sin `I`, `O`, `0`, `1`)
 - **Respuesta (200)**
   - `{ ok: true, minor_id, device_id, message }`
@@ -286,9 +339,8 @@ curl "http://localhost:8788/api/pairing/generate-code" ^
 
 ```bash
 curl "http://localhost:8788/api/pairing/confirm-code" ^
-  -H "Authorization: Bearer ACCESS_TOKEN" ^
   -H "Content-Type: application/json" ^
-  -d "{\"parent_id\":\"UUID_DEL_PADRE\",\"otp\":\"ABC234\"}"
+  -d "{\"parent_id\":\"00000000-0000-4000-8000-000000000001\",\"otp\":\"ABC234\"}"
 ```
 
 ---
@@ -318,7 +370,7 @@ curl "http://localhost:8788/api/pairing/claim" ^
 
 #### `POST /api/notifications/analyze`
 
-- **Auth**: sí (y el menor debe pertenecer al padre autenticado)
+- **Auth**: no en el prototipo actual (valida que exista `minor_id` en BD)
 - **Body (JSON)**:
   - `minor_id` (UUID, requerido)
   - `text_preview` (string, requerido; mínimo 3 chars)
@@ -348,7 +400,6 @@ El backend replica el patrón: **clasificación local primero**, y solo si hay *
 
 ```bash
 curl "http://localhost:8788/api/notifications/analyze" ^
-  -H "Authorization: Bearer ACCESS_TOKEN" ^
   -H "Content-Type: application/json" ^
   -d "{\"minor_id\":\"UUID_DEL_MENOR\",\"text_preview\":\"Me puedes pasar tu dirección?\",\"app_source\":\"WhatsApp\",\"risk_level\":2,\"confidence_score\":0.55,\"sensitive_data_flag\":true}"
 ```
@@ -361,22 +412,21 @@ curl "http://localhost:8788/api/notifications/analyze" ^
 
 #### `GET /api/gamification/streak?parent_id={PARENT_UUID}`
 
-- **Auth**: sí (el `parent_id` debe ser el usuario autenticado)
+- **Auth**: no en el prototipo actual
 - **Respuesta (200)**
   - `{ ok: true, parent_id, safe_days_streak }`
 
 **Ejemplo**
 
 ```bash
-curl "http://localhost:8788/api/gamification/streak?parent_id=UUID_DEL_PADRE" ^
-  -H "Authorization: Bearer ACCESS_TOKEN"
+curl "http://localhost:8788/api/gamification/streak?parent_id=UUID_DEL_PADRE"
 ```
 
 ### Catálogo de misiones + progreso
 
 #### `GET /api/gamification/missions?parent_id={PARENT_UUID}`
 
-- **Auth**: sí (el `parent_id` debe ser el usuario autenticado)
+- **Auth**: no en el prototipo actual
 - **Respuesta (200)**
   - `{ ok: true, parent_id, missions, missions_completed_count }`
   - Cada misión incluye `id`, `title`, `description`, `estimated_minutes`, `category`, `is_completed`
@@ -384,17 +434,16 @@ curl "http://localhost:8788/api/gamification/streak?parent_id=UUID_DEL_PADRE" ^
 **Ejemplo**
 
 ```bash
-curl "http://localhost:8788/api/gamification/missions?parent_id=UUID_DEL_PADRE" ^
-  -H "Authorization: Bearer ACCESS_TOKEN"
+curl "http://localhost:8788/api/gamification/missions?parent_id=UUID_DEL_PADRE"
 ```
 
 ### Completar una misión
 
 #### `POST /api/gamification/missions/complete`
 
-- **Auth**: sí (padre autenticado)
+- **Auth**: no en el prototipo actual
 - **Body (JSON)**:
-  - `parent_id` (UUID, requerido; debe coincidir con el usuario autenticado)
+  - `parent_id` (UUID, requerido)
   - `mission_id` (string, requerido; debe existir en el catálogo)
 - **Respuesta (200)**
   - `{ ok: true, mission_id, missions_completed_count, already_completed }`
@@ -403,7 +452,6 @@ curl "http://localhost:8788/api/gamification/missions?parent_id=UUID_DEL_PADRE" 
 
 ```bash
 curl "http://localhost:8788/api/gamification/missions/complete" ^
-  -H "Authorization: Bearer ACCESS_TOKEN" ^
   -H "Content-Type: application/json" ^
   -d "{\"parent_id\":\"UUID_DEL_PADRE\",\"mission_id\":\"dif-grooming-guia-2024\"}"
 ```
@@ -414,9 +462,11 @@ curl "http://localhost:8788/api/gamification/missions/complete" ^
 
 #### `POST /api/assistant/chat`
 
-- **Auth**: sí
+- **Auth**: no en el prototipo actual
 - **Body (JSON)**:
-  - `message` (string, opcional)
+  - `parent_id` (UUID, requerido)
+  - `message` (string, requerido; mínimo 3 caracteres)
+  - `ui_context` (objeto, opcional)
 - **Respuesta (200)**
   - `{ ok: true, reply }`
 
@@ -424,9 +474,8 @@ curl "http://localhost:8788/api/gamification/missions/complete" ^
 
 ```bash
 curl "http://localhost:8788/api/assistant/chat" ^
-  -H "Authorization: Bearer ACCESS_TOKEN" ^
   -H "Content-Type: application/json" ^
-  -d "{\"message\":\"¿Qué puedo hacer si mi hijo recibe mensajes raros?\"}"
+  -d "{\"parent_id\":\"00000000-0000-4000-8000-000000000001\",\"message\":\"¿Qué puedo hacer si mi hijo recibe mensajes raros?\"}"
 ```
 
 ---
@@ -442,6 +491,7 @@ Estos endpoints son para que el **dispositivo** envíe datos al backend. Se aute
 #### `GET /api/device/me`
 
 - **Auth**: sí (Device)
+- **Query**: `minor_id`, `device_id` (UUID, requeridos)
 - **Respuesta**: `{ ok: true, device_id, minor_id }`
 
 ### Heartbeat (estado / batería / protección)
@@ -510,11 +560,8 @@ curl "http://localhost:8788/api/device/alerts" ^
 ## Flujo recomendado (Android ↔ Backend ↔ PWA)
 
 1) **Android** llama `POST /api/pairing/generate-code` → recibe `session_id` + `otp`  
-2) **Padre (PWA)** confirma con `POST /api/pairing/confirm-code` (JWT Supabase) → se crea `minor` + `device`  
-3) **Android** reclama con `POST /api/pairing/claim` (session_id + otp) → recibe `api_key`  
-4) **Android** usa `Authorization: Device <api_key>` para:
-   - mandar alertas (`/api/device/alerts`)
-   - mandar métricas (`/api/device/screen-time/batch`, `/api/device/app-events/batch`)
-   - mandar heartbeat (`/api/device/heartbeat`)
-5) **PWA** solo lee dashboard desde Supabase vía backend (`GET /api/dashboard`, etc.)
+2) **Padre (PWA)** confirma con `POST /api/pairing/confirm-code` (`parent_id` + `otp`; sin JWT en el prototipo) → se asegura usuario/padre en BD, se crean `minor` + `device`  
+3) **Android** reclama con `POST /api/pairing/claim` (`session_id` + `otp`) → recibe `api_key`  
+4) **Android** usa `Authorization: Device <api_key>` para alertas, métricas y heartbeat (`/api/device/*`)  
+5) **PWA** lee datos vía backend (`GET /api/dashboard`, etc.) con la misma `BASE_URL` que el móvil
 
