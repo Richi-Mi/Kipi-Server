@@ -1,0 +1,119 @@
+# --- SO e IDEs ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+.cursor/
+*.sublime-*
+
+# --- Dependencias ---
+node_modules/
+/.pnp
+.pnp.js
+.pnp.*
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# --- Build ---
+build/
+dist/
+out/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+storybook-static/
+dev-dist/
+
+# --- Tests y cobertura ---
+coverage/
+.nyc_output/
+jest-cache/
+test_reports/
+test_result.md
+*.lcov
+.test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# --- PWA / calidad  ---
+lighthouse-report*.html
+lighthouse.*.json
+
+# --- Entornos y credenciales  ---
+.env
+.env.*
+!.env.example
+!.env*.example
+*.pem
+*.key
+credentials.json
+*token.json*
+*credentials.json*
+.credentials
+
+# --- Logs ---
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# --- Python ---
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# --- Cachés de linters, bundlers y análisis ---
+.cache/
+.eslintcache
+.stylelintcache
+.parcel-cache/
+.turbo/
+.fusebox/
+.rpt2_cache/
+.dynamodb/
+.webpack/
+.swc/
+.vite/
+vite.config.*.timestamp*
+
+# --- Despliegue ---
+.vercel/
+
+
+# --- Carpeta local: cachés, borradores y archivos que no aportan al proyecto ---
+tool-cache/
+Kipisafe-logos/
+
+# --- Archivos y rutas específicas de este proyecto ---
+dump.rdb
+agenthub/agents/youtube/db
+chainlit.md
+.chainlit
+.ipynb_checkpoints/
+.ac
+memory/test_credentials.md
+
+# --- Archivos comprimidos / binarios sueltos ---
+*.zip
+*.tar.gz
+*.tar
+*.tgz
+*.pack
+*.deb
+*.dylib
