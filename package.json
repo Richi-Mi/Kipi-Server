@@ -13,7 +13,7 @@
     "build": "pnpm run build:domain && pnpm -r --filter ./apps/* build",
     "typecheck": "pnpm run build:domain && pnpm -r typecheck",
     "lint": "pnpm -r lint",
-    "start": "pnpm --filter @kipi/api start",
+    "start": "pnpm run build:pwa && pnpm run build:api && pnpm --filter @kipi/api start",
     "start:api": "pnpm --filter @kipi/api start",
     "start:pwa": "pnpm --filter @kipi/pwa start"
   }
