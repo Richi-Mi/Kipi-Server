@@ -31,7 +31,7 @@ type Mission = {
 
 export function EducationalMissions({
   parentId,
-  accessToken,
+  accessToken: _accessToken,
   enabled,
 }: {
   parentId: string | undefined | null;
@@ -45,13 +45,11 @@ export function EducationalMissions({
   const [celebrateId, setCelebrateId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!enabled || !parentId || !accessToken) return;
+    if (!enabled || !parentId) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${apiUrl("/api/gamification/missions")}?parent_id=${encodeURIComponent(parentId)}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const res = await fetch(`${apiUrl("/api/gamification/missions")}?parent_id=${encodeURIComponent(parentId)}`);
       const body = (await res.json().catch(() => ({}))) as any;
       if (!res.ok) throw new Error(body.message || body.error || `HTTP ${res.status}`);
       if (!body.ok || !Array.isArray(body.missions)) throw new Error("Respuesta del servidor inesperada.");
@@ -62,20 +60,19 @@ export function EducationalMissions({
     } finally {
       setLoading(false);
     }
-  }, [enabled, parentId, accessToken]);
+  }, [enabled, parentId]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const complete = async (missionId: string) => {
-    if (!enabled || !parentId || !accessToken) return;
+    if (!enabled || !parentId) return;
     setBusyId(missionId);
     try {
       const res = await fetch(apiUrl("/api/gamification/missions/complete"), {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ parent_id: parentId, mission_id: missionId }),
@@ -95,7 +92,7 @@ export function EducationalMissions({
   if (!enabled) {
     return (
       <section className="rounded-xl border border-dashed border-border p-5 text-sm text-muted-foreground">
-        Conecta tu cuenta para ver las misiones de alfabetización digital.
+        Sin datos en vivo para esta vista.
       </section>
     );
   }

@@ -54,7 +54,7 @@ type WeeklyPoint = { day: string; hours: number };
 
 export function ScreenTimeChart({
   minorId,
-  accessToken,
+  accessToken: _accessToken,
   enabled,
 }: {
   minorId: string | null;
@@ -69,7 +69,7 @@ export function ScreenTimeChart({
   const [weekly, setWeekly] = useState<WeeklyPoint[]>([]);
 
   useEffect(() => {
-    if (!enabled || !minorId || !accessToken) {
+    if (!enabled || !minorId) {
       setByCategory([]);
       setWeekly([]);
       setError(null);
@@ -83,7 +83,6 @@ export function ScreenTimeChart({
 
     fetch(`${apiUrl("/api/screen-time")}?minor_id=${encodeURIComponent(minorId)}`, {
       cache: "no-store",
-      headers: { Authorization: `Bearer ${accessToken}` },
     })
       .then(async (res) => {
         const body = (await res.json().catch(() => ({}))) as any;
@@ -116,15 +115,14 @@ export function ScreenTimeChart({
     return () => {
       cancelled = true;
     };
-  }, [enabled, minorId, accessToken]);
+  }, [enabled, minorId]);
 
   const totalToday = useMemo(() => {
     return byCategory.reduce((acc, item) => acc + item.hours, 0).toFixed(1);
   }, [byCategory]);
 
   const hasData = byCategory.length > 0 || weekly.length > 0;
-  const needsLogin = !accessToken;
-  const needsMinor = !!accessToken && !minorId;
+  const needsMinor = enabled && !minorId;
 
   return (
     <div className="bg-card rounded-xl border border-border p-5 shadow-card">
@@ -168,9 +166,9 @@ export function ScreenTimeChart({
       </div>
 
       <div className="h-52">
-        {!enabled || needsLogin ? (
+        {!enabled ? (
           <div className="h-full rounded-xl border border-dashed border-border bg-background/40 flex items-center justify-center px-6">
-            <p className="text-sm text-muted-foreground text-center">Inicia sesión para ver métricas reales.</p>
+            <p className="text-sm text-muted-foreground text-center">Sin datos en vivo para esta vista.</p>
           </div>
         ) : needsMinor ? (
           <div className="h-full rounded-xl border border-dashed border-border bg-background/40 flex items-center justify-center px-6">

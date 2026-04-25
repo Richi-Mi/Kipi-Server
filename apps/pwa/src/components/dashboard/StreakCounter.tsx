@@ -6,7 +6,7 @@ import { friendlyErrorMessage } from "@/lib/friendly-error";
 
 export function StreakCounter({
   parentId,
-  accessToken,
+  accessToken: _accessToken,
   enabled,
   childName = "tu hijo",
 }: {
@@ -20,13 +20,11 @@ export function StreakCounter({
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!enabled || !parentId || !accessToken) return;
+    if (!enabled || !parentId) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${apiUrl("/api/gamification/streak")}?parent_id=${encodeURIComponent(parentId)}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const res = await fetch(`${apiUrl("/api/gamification/streak")}?parent_id=${encodeURIComponent(parentId)}`);
       const body = (await res.json().catch(() => ({}))) as any;
       if (!res.ok) throw new Error(body.message || body.error || `HTTP ${res.status}`);
       if (typeof body.safe_days_streak !== "number") throw new Error("Respuesta inválida del servidor.");
@@ -37,7 +35,7 @@ export function StreakCounter({
     } finally {
       setLoading(false);
     }
-  }, [enabled, parentId, accessToken]);
+  }, [enabled, parentId]);
 
   useEffect(() => {
     load();
@@ -46,7 +44,7 @@ export function StreakCounter({
   if (!enabled) {
     return (
       <div className="rounded-xl border border-border bg-muted/30 p-5 text-sm text-muted-foreground">
-        Inicia sesión con Supabase para ver tu racha de paz mental.
+        Sin datos en vivo para esta vista.
       </div>
     );
   }

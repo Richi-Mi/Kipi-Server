@@ -22,7 +22,7 @@ import type { ApiMinor } from "@kipi/domain";
 import { friendlyErrorMessage } from "@/lib/friendly-error";
 
 export default function Dashboard() {
-  const { user, accessToken, supabaseMode } = useAuth() as any;
+  const { user, accessToken } = useAuth() as any;
   const [activeChildIndex, setActiveChildIndex] = useState(0);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -32,7 +32,7 @@ export default function Dashboard() {
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [remoteError, setRemoteError] = useState<string | null>(null);
 
-  const useLiveApi = supabaseMode && !!accessToken && user?.id && isUuid(user.id);
+  const useLiveApi = Boolean(user?.id && isUuid(user.id));
 
   const loadDashboard = useCallback(async () => {
     if (!useLiveApi) return;
@@ -41,7 +41,6 @@ export default function Dashboard() {
     try {
       const res = await fetch(`${apiUrl("/api/dashboard")}?parent_id=${encodeURIComponent(user.id)}`, {
         cache: "no-store",
-        headers: { Authorization: `Bearer ${accessToken}` },
       });
       const body = (await res.json().catch(() => ({}))) as any;
       if (!res.ok) throw new Error(body.message || body.error || `HTTP ${res.status}`);
@@ -53,11 +52,29 @@ export default function Dashboard() {
     } finally {
       setRemoteLoading(false);
     }
-  }, [useLiveApi, accessToken, user?.id]);
+  }, [useLiveApi, user?.id]);
 
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
+
+  // Refresco frecuente para que alertas y menores enviados desde el móvil aparezcan sin recargar la PWA.
+  useEffect(() => {
+    if (!useLiveApi) return;
+    const refresh = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      void loadDashboard();
+    };
+    const intervalMs = 4000;
+    const id = window.setInterval(refresh, intervalMs);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [useLiveApi, loadDashboard]);
 
   const profiles: ChildProfile[] = useMemo(() => {
     if (!useLiveApi) return [];
@@ -218,19 +235,16 @@ export default function Dashboard() {
 
           {useLiveApi && !remoteLoading && profiles.length === 0 && !remoteError && (
             <div className="mb-4 rounded-xl border border-border bg-card p-4">
-              <p className="text-sm font-semibold text-foreground">No hay menores asociados a tu cuenta</p>
+              <p className="text-sm font-semibold text-foreground">Aún no hay un dispositivo vinculado</p>
               <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-                El backend está respondiendo, pero no encontró menores para tu usuario actual.
-                Si sembraste datos de demo, asegúrate de que el <span className="font-semibold text-foreground">parent_id</span>{" "}
-                coincida con tu <span className="font-semibold text-foreground">auth.users.id</span>.
+                En la app del menor genera el código de emparejamiento; luego confírmalo aquí en{" "}
+                <span className="font-semibold text-foreground">Vincular</span>. El tiempo de pantalla y las apps
+                recientes aparecerán cuando el celular envíe datos por la API.
               </p>
               <div className="mt-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
-                <p className="text-xs text-muted-foreground">Tu `auth.users.id` (cópialo al seed si hace falta)</p>
+                <p className="text-xs text-muted-foreground">Identificador de padre (demo)</p>
                 <p className="text-xs font-mono text-foreground break-all">{String(user?.id || "")}</p>
               </div>
-              <p className="text-xs text-muted-foreground mt-3">
-                Archivo: <span className="font-mono">apps/api/supabase/migrations/006_demo_seed.sql</span>
-              </p>
             </div>
           )}
 
@@ -240,7 +254,7 @@ export default function Dashboard() {
               onMarkRead={handleMarkRead}
               onDismiss={handleDismiss}
               minorId={minorIdIsApiReady ? activeMinorId : (activeChild?.id as any)}
-              analyzeDisabled={supabaseMode && !!accessToken && !minorIdIsApiReady}
+              analyzeDisabled={!minorIdIsApiReady}
             />
           </section>
 
@@ -274,7 +288,7 @@ export default function Dashboard() {
               <section id="section-agreement">
                 <ParentalAgreements
                   minorId={minorIdIsApiReady ? activeMinorId : (activeChild?.id as any)}
-                  switchesDisabled={supabaseMode && !!accessToken && !minorIdIsApiReady}
+                  switchesDisabled={!minorIdIsApiReady}
                 />
               </section>
             </div>

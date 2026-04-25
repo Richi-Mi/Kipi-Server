@@ -43,7 +43,7 @@ function actionLabel(eventType: RecentAppRow["event_type"]): string {
 
 export function RecentApps({
   minorId,
-  accessToken,
+  accessToken: _accessToken,
   enabled,
 }: {
   minorId: string | null;
@@ -53,11 +53,9 @@ export function RecentApps({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [apps, setApps] = useState<RecentAppRow[]>([]);
-  const needsLogin = !accessToken;
-  const needsMinor = !!accessToken && !minorId;
 
   useEffect(() => {
-    if (!enabled || !minorId || !accessToken) {
+    if (!enabled || !minorId) {
       setApps([]);
       setError(null);
       setLoading(false);
@@ -70,7 +68,6 @@ export function RecentApps({
 
     fetch(`${apiUrl("/api/apps/recent")}?minor_id=${encodeURIComponent(minorId)}`, {
       cache: "no-store",
-      headers: { Authorization: `Bearer ${accessToken}` },
     })
       .then(async (res) => {
         const body = (await res.json().catch(() => ({}))) as any;
@@ -105,7 +102,7 @@ export function RecentApps({
     return () => {
       cancelled = true;
     };
-  }, [enabled, minorId, accessToken]);
+  }, [enabled, minorId]);
 
   const view = useMemo(() => {
     return apps.map((a) => {
@@ -140,11 +137,11 @@ export function RecentApps({
       </div>
 
       <div className="flex-1 space-y-1">
-        {!enabled || needsLogin ? (
+        {!enabled ? (
           <div className="h-full rounded-xl border border-dashed border-border bg-background/40 flex items-center justify-center px-6 py-10">
-            <p className="text-sm text-muted-foreground text-center">Inicia sesión para ver eventos reales.</p>
+            <p className="text-sm text-muted-foreground text-center">Sin datos en vivo para esta vista.</p>
           </div>
-        ) : needsMinor ? (
+        ) : !minorId ? (
           <div className="h-full rounded-xl border border-dashed border-border bg-background/40 flex items-center justify-center px-6 py-10">
             <p className="text-sm text-muted-foreground text-center">
               Vincula o selecciona un menor para ver eventos reales.

@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { useAuth } from "@/context/AuthContext";
 import { apiUrl } from "@/lib/api";
 
 export function ManualAlertForm({
@@ -27,30 +26,22 @@ export function ManualAlertForm({
 }) {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({ description: "", app: "", level: 1 });
-  const { accessToken, supabaseMode } = useAuth();
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      if (supabaseMode && accessToken) {
-        const res = await fetch(apiUrl("/api/alerts/manual"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-          body: JSON.stringify({
-            minor_id: minorId,
-            description: formData.description,
-            app_source: formData.app,
-            risk_level: formData.level,
-          }),
-        });
-        if (!res.ok) throw new Error("Error HTTP");
-        toast.success("Alerta manual creada con éxito");
-      } else {
-        const { mockAddManualAlert } = await import("@/lib/mockEndpoints");
-        await mockAddManualAlert(formData);
-        toast.success("Alerta manual creada con éxito (Modo Simulado)");
-      }
+      const res = await fetch(apiUrl("/api/alerts/manual"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          minor_id: minorId,
+          description: formData.description,
+          app_source: formData.app,
+          risk_level: formData.level,
+        }),
+      });
+      if (!res.ok) throw new Error("Error HTTP");
+      toast.success("Alerta manual creada con éxito");
       onOpenChange(false);
       setFormData({ description: "", app: "", level: 1 });
       onSuccess?.();

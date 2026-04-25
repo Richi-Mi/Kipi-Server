@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { useAuth } from "@/context/AuthContext";
 import { apiUrl } from "@/lib/api";
 
 type Agreements = {
@@ -24,8 +23,6 @@ export function ParentalAgreements({
     screenTimeLimits: true,
   });
   const [loading, setLoading] = useState(false);
-  const { accessToken, supabaseMode } = useAuth();
-
   const handleToggle = async (key: keyof Agreements) => {
     if (switchesDisabled) return;
     const newValue = !agreements[key];
@@ -40,17 +37,12 @@ export function ParentalAgreements({
 
     setLoading(true);
     try {
-      if (supabaseMode && accessToken) {
-        const res = await fetch(apiUrl("/api/minors/agreement"), {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-          body: JSON.stringify({ minor_id: minorId, shared_alert_levels: levelsArr }),
-        });
-        if (!res.ok) throw new Error("Error del servidor");
-      } else {
-        const { mockUpdateAgreement } = await import("@/lib/mockEndpoints");
-        await mockUpdateAgreement(newConfig);
-      }
+      const res = await fetch(apiUrl("/api/minors/agreement"), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ minor_id: minorId, shared_alert_levels: levelsArr }),
+      });
+      if (!res.ok) throw new Error("Error del servidor");
       toast.success("Acuerdos parentales guardados");
     } catch {
       toast.error("Fallo al actualizar acuerdos");

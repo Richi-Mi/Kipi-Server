@@ -63,7 +63,7 @@ function formatLastAudit(value: string | null): string {
 
 export function AITransparency({
   parentId,
-  accessToken,
+  accessToken: _accessToken,
   enabled,
 }: {
   parentId: string | null | undefined;
@@ -93,7 +93,7 @@ export function AITransparency({
   }, [startMsg]);
 
   useEffect(() => {
-    if (!enabled || !parentId || !accessToken) {
+    if (!enabled || !parentId) {
       setStats(null);
       setError(null);
       setLoading(false);
@@ -104,9 +104,7 @@ export function AITransparency({
     setLoading(true);
     setError(null);
 
-    fetch(`${apiUrl("/api/ai/stats")}?parent_id=${encodeURIComponent(parentId)}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
+    fetch(`${apiUrl("/api/ai/stats")}?parent_id=${encodeURIComponent(parentId)}`)
       .then(async (res) => {
         const body = (await res.json().catch(() => ({}))) as any;
         if (!res.ok) throw new Error(body.message || body.error || `HTTP ${res.status}`);
@@ -130,7 +128,7 @@ export function AITransparency({
     return () => {
       cancelled = true;
     };
-  }, [enabled, parentId, accessToken]);
+  }, [enabled, parentId]);
 
   return (
     <div ref={containerRef} className="bg-card rounded-xl border border-border p-5 shadow-card h-full flex flex-col">

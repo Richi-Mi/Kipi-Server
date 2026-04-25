@@ -1,8 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { createBrowserRouter, RouterProvider, Outlet, Navigate, useLocation } from "react-router";
+import { createBrowserRouter, RouterProvider, Outlet, Navigate } from "react-router";
 import { registerSW } from "virtual:pwa-register";
-import { AuthProvider, useAuth } from "./context/AuthContext";
+import { AuthProvider } from "./context/AuthContext";
 import LoginPage from "./pages/LoginPage";
 import Dashboard from "./pages/Dashboard";
 import PairingPage from "./pages/PairingPage";
@@ -40,23 +40,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 }
 
-// Componente para proteger rutas que requieren sesión iniciada
-const PrivateRoute = () => {
-  const { user, authLoading, isNewUser } = useAuth();
-  const location = useLocation();
-  
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-  
-  if (!user) return <Navigate to="/login" replace />;
-  if (isNewUser && location.pathname !== "/pairing") return <Navigate to="/pairing" replace />;
-  return <Outlet />;
-};
+const AppShell = () => <Outlet />;
 
 const router = createBrowserRouter([
   {
@@ -65,7 +49,7 @@ const router = createBrowserRouter([
   },
   {
     path: "/",
-    element: <PrivateRoute />,
+    element: <AppShell />,
     children: [
       {
         path: "dashboard",

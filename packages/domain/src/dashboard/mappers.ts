@@ -62,9 +62,15 @@ export function mapApiAlert(row: any): DashboardAlertItem {
     // ignore
   }
   const ap = row.asistente_parental;
-  const summary = ap?.guia_contextual
-    ? String(ap.guia_contextual).slice(0, 320)
-    : `Alerta nivel ${row.risk_level} (${row.app_source || "App"})`;
+  const desc =
+    typeof row.description === "string" && row.description.trim().length > 0
+      ? String(row.description).trim().slice(0, 320)
+      : null;
+  const summary = desc
+    ? desc
+    : ap?.guia_contextual
+      ? String(ap.guia_contextual).slice(0, 320)
+      : `Alerta nivel ${row.risk_level} (${row.app_source || "App"})`;
   const intervention = Array.isArray(ap?.recursos)
     ? `Recursos: ${ap.recursos.join(", ")}`
     : row.sensitive_data_flag

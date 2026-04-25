@@ -7,6 +7,12 @@ import { VitePWA } from "vite-plugin-pwa";
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const previewPort = Number(process.env["PORT"]) || 4173;
 
+/** Destino del proxy en dev: API local (mismo .env que `pnpm --filter @kipi/api dev`). */
+const apiProxyTarget =
+  process.env["VITE_API_PROXY_TARGET"]?.trim() ||
+  process.env["API_PROXY_TARGET"]?.trim() ||
+  "http://127.0.0.1:8788";
+
 export default defineConfig({
   plugins: [
     react(),
@@ -60,14 +66,12 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "https://kipi-server-production.up.railway.app",
+        target: apiProxyTarget,
         changeOrigin: true,
-        secure: true,
       },
       "/health": {
-        target: "https://kipi-server-production.up.railway.app",
+        target: apiProxyTarget,
         changeOrigin: true,
-        secure: true,
       },
     },
   },

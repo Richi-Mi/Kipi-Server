@@ -40,7 +40,7 @@ function defaultWelcomeMessage(activeSection: string | undefined): ChatMessage {
 
 export function ParentalChat({
   parentId,
-  accessToken,
+  accessToken: _accessToken,
   enabled,
   activeSection,
 }: {
@@ -57,10 +57,10 @@ export function ParentalChat({
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const canSend = useMemo(() => {
-    if (!enabled || !parentId || !accessToken) return false;
+    if (!enabled || !parentId) return false;
     const trimmed = String(draft || "").trim();
     return trimmed.length >= 3 && !loading;
-  }, [enabled, parentId, accessToken, draft, loading]);
+  }, [enabled, parentId, draft, loading]);
 
   useEffect(() => {
     setMessages((prev) => {
@@ -101,7 +101,6 @@ export function ParentalChat({
       const res = await fetch(apiUrl("/api/assistant/chat"), {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -136,7 +135,7 @@ export function ParentalChat({
     } finally {
       setLoading(false);
     }
-  }, [canSend, draft, accessToken, parentId, activeSection]);
+  }, [canSend, draft, parentId, activeSection]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== "Enter") return;
@@ -148,7 +147,7 @@ export function ParentalChat({
   if (!enabled) {
     return (
       <section className="rounded-xl border border-dashed border-border p-5 text-sm text-muted-foreground">
-        Conecta tu cuenta para usar el Asistente Parental (requiere sesión y token).
+        Sin datos en vivo para esta vista.
       </section>
     );
   }

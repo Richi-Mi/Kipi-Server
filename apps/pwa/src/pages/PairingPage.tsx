@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ShieldCheck,
@@ -23,8 +23,7 @@ type ConfirmCodeResponse =
   | { ok: false; error?: string; message?: string };
 
 export default function PairingPage() {
-  const { user, accessToken, authLoading, supabaseMode, completePairing, refreshBackendState } =
-    useAuth();
+  const { user, authLoading, completePairing, refreshBackendState } = useAuth();
   const navigate = useNavigate();
 
   const [otp, setOtp] = useState("");
@@ -32,7 +31,7 @@ export default function PairingPage() {
   const [pairedMinorId, setPairedMinorId] = useState<string | null>(null);
 
   const normalizedOtp = useMemo(() => otp.trim().toUpperCase(), [otp]);
-  const canSubmit = normalizedOtp.length === 6 && !!user?.id && !!accessToken && supabaseMode;
+  const canSubmit = normalizedOtp.length === 6 && !!user?.id;
   const isLoading = pairingState === "loading";
   const isSuccess = pairingState === "success";
 
@@ -44,8 +43,6 @@ export default function PairingPage() {
     );
   }
 
-  if (!user) return <Navigate to="/login" replace />;
-
   const onConfirm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit || isLoading || isSuccess) return;
@@ -56,7 +53,6 @@ export default function PairingPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({ otp: normalizedOtp, parent_id: user.id }),
       });
@@ -178,19 +174,7 @@ export default function PairingPage() {
       <div className="flex-1 flex items-start sm:items-center justify-center p-5 sm:p-8 pt-8">
         <div className="w-full max-w-md">
           <div className="bg-card rounded-2xl border border-border shadow-sm p-6 sm:p-8">
-            {!supabaseMode ? (
-              <div className="space-y-2">
-                <h2 className="font-display font-bold text-foreground text-lg">
-                  Supabase no está configurado
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  Configura{" "}
-                  <code className="font-mono text-[12px]">VITE_SUPABASE_URL</code> y{" "}
-                  <code className="font-mono text-[12px]">VITE_SUPABASE_ANON_KEY</code> en{" "}
-                  <code className="font-mono text-[12px]">apps/pwa/.env</code>.
-                </p>
-              </div>
-            ) : isSuccess ? (
+            {isSuccess ? (
               <div className="text-center py-6">
                 <div className="w-20 h-20 rounded-full bg-emerald-500/10 border-2 border-emerald-500/30 flex items-center justify-center mx-auto mb-5">
                   <CheckCircle2 className="w-10 h-10 text-emerald-600" />

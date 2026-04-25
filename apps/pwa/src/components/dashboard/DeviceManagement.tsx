@@ -45,7 +45,7 @@ function formatLastSync(value: string | null): string {
 
 export function DeviceManagement({
   minorId,
-  accessToken,
+  accessToken: _accessToken,
   enabled,
 }: {
   minorId: string | null;
@@ -58,7 +58,7 @@ export function DeviceManagement({
   const [devices, setDevices] = useState<DeviceRow[]>([]);
 
   useEffect(() => {
-    if (!enabled || !minorId || !accessToken) {
+    if (!enabled || !minorId) {
       setDevices([]);
       setError(null);
       setLoading(false);
@@ -69,9 +69,7 @@ export function DeviceManagement({
     setLoading(true);
     setError(null);
 
-    fetch(`${apiUrl("/api/devices")}?minor_id=${encodeURIComponent(minorId)}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
+    fetch(`${apiUrl("/api/devices")}?minor_id=${encodeURIComponent(minorId)}`)
       .then(async (res) => {
         const body = (await res.json().catch(() => ({}))) as any;
         if (!res.ok) throw new Error(body.message || body.error || `HTTP ${res.status}`);
@@ -104,7 +102,7 @@ export function DeviceManagement({
     return () => {
       cancelled = true;
     };
-  }, [enabled, minorId, accessToken]);
+  }, [enabled, minorId]);
 
   const onlineCount = useMemo(() => devices.filter((d) => d.status === "online").length, [devices]);
 
@@ -154,7 +152,7 @@ export function DeviceManagement({
       <div className="flex-1 space-y-3">
         {!enabled ? (
           <div className="h-full rounded-xl border border-dashed border-border bg-background/40 flex items-center justify-center px-6 py-10">
-            <p className="text-sm text-muted-foreground text-center">Inicia sesión y selecciona un menor para ver dispositivos reales.</p>
+            <p className="text-sm text-muted-foreground text-center">Selecciona un menor con datos en vivo para ver dispositivos.</p>
           </div>
         ) : error ? (
           <div className="h-full rounded-xl border border-dashed border-border bg-background/40 flex items-center justify-center px-6 py-10">
